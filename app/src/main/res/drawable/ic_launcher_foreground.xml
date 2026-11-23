@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Lembar catatan putih -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39,27 h30 a9,9 0 0 1 9,9 v36 a9,9 0 0 1 -9,9 h-30 a9,9 0 0 1 -9,-9 v-36 a9,9 0 0 1 9,-9 z" />
+
+    <!-- Garis teks -->
+    <path
+        android:strokeColor="#c9d6ff"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:pathData="M37,42 h26 M37,52 h26 M37,62 h15" />
+
+    <!-- Lingkaran centang -->
+    <path
+        android:fillColor="#6d5dfc"
+        android:pathData="M70,62 m-11,0 a11,11 0 1 0 22,0 a11,11 0 1 0 -22,0" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M64.5,62 l4,4 l7.5,-8.5" />
+</vector>

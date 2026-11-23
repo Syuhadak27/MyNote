@@ -1,0 +1,26 @@
+package com.catatan.app
+
+import android.app.Application
+import com.catatan.app.data.Repo
+
+/**
+ * Kelas Application — memuat penyimpanan tunggal sekali di awal.
+ * (Nama ini juga tercantum di AndroidManifest: android:name=".CatatanApp")
+ */
+class CatatanApp : Application() {
+
+    lateinit var repo: Repo
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        repo = Repo(this)
+        repo.load()
+    }
+
+    companion object {
+        lateinit var instance: CatatanApp
+            private set
+    }
+}
