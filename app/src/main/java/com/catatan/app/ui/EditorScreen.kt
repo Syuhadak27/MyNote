@@ -1014,6 +1014,11 @@ fun EditorScreen(state: AppState) {
                     Icons.Filled.Close,
                     "Bersihkan format",
                     { clearFormat(); true }
+                ),
+                Triple(
+                    Icons.Filled.Delete,
+                    "Hapus blok",
+                    { if (focusIndex in blocks.indices) deleteBlock(focusIndex); true }
                 )
             )
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -1266,7 +1271,6 @@ private fun BlockView(
                         cursorBrush = SolidColor(c.accent),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    DeleteHint(onDelete)
                 }
             }
         }
@@ -1315,7 +1319,6 @@ private fun BlockView(
                     )
                 }
             }
-            DeleteHint(onDelete)
         }
 
         is Block.BulletList, is Block.NumberedList -> {
@@ -1347,7 +1350,6 @@ private fun BlockView(
                         )
                     }
                 }
-                DeleteHint(onDelete)
             }
         }
 
@@ -1357,7 +1359,7 @@ private fun BlockView(
         ) {
             Box(Modifier.height(1.dp).weight(1f).background(c.borderStrong))
             Spacer(Modifier.width(8.dp))
-            AppIconButton(Icons.Filled.Close, "Hapus garis", onDelete, size = 26.dp)
+            AppIconButton(Icons.Filled.Delete, "Hapus garis", onDelete, size = 26.dp)
         }
 
         is Block.Image -> Box(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
@@ -1373,7 +1375,6 @@ private fun BlockView(
                     Spacer(Modifier.height(3.dp))
                     Text(block.alt, color = c.text3, fontSize = 10.5.sp)
                 }
-                DeleteHint(onDelete)
             }
         }
 
@@ -1419,15 +1420,7 @@ private fun BlockView(
                     }
                 }
             }
-            DeleteHint(onDelete)
         }
-    }
-}
-
-@Composable
-private fun DeleteHint(onDelete: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        AppIconButton(Icons.Filled.Close, "Hapus blok", onDelete, size = 24.dp)
     }
 }
 

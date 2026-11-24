@@ -400,7 +400,7 @@ object HtmlCodec {
             .filter { it.end > it.start && it.start >= 0 && it.start <= text.length }
             .map { it.copy(end = it.end.coerceAtMost(text.length)) }
             .sortedWith(compareBy({ it.start }, { -it.end }))
-        if (valid.isEmpty()) return escape(text)
+        if (valid.isEmpty()) return escape(text).replace("\n", "<br>")
 
         val sb = StringBuilder()
         val open = mutableListOf<Mark>()
@@ -427,7 +427,8 @@ object HtmlCodec {
                 }
                 idx++
             }
-            sb.append(escape(text[i].toString()))
+            val c = text[i]
+            if (c == '\n') sb.append("<br>") else sb.append(escape(c.toString()))
             i++
         }
         for (j in open.indices.reversed()) sb.append(closeTag(open[j]))
