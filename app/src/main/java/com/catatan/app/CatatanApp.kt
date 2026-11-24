@@ -1,6 +1,7 @@
 package com.catatan.app
 
 import android.app.Application
+import com.catatan.app.data.MediaStore
 import com.catatan.app.data.Repo
 
 /**
@@ -17,6 +18,9 @@ class CatatanApp : Application() {
         instance = this
         repo = Repo(this)
         repo.load()
+        MediaStore.init(this)
+        MediaStore.prune(repo.current.notes)
+        if (repo.current.settings.autoPurgeTrash) repo.purgeExpiredTrash()
     }
 
     companion object {

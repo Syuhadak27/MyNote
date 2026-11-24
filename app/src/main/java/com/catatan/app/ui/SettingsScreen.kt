@@ -191,6 +191,14 @@ fun SettingsScreen(state: AppState) {
                 ) { value ->
                     state.updateSettings { s -> s.copy(spellcheck = value) }
                 }
+
+                SwitchRow(
+                    title = "Entar buat blok baru",
+                    subtitle = "Tekan Enter untuk memisah paragraf, bukan baris baru",
+                    checked = settings.enterCreatesBlock
+                ) { value ->
+                    state.updateSettings { s -> s.copy(enterCreatesBlock = value) }
+                }
             }
 
             /* ---------------- 3. Perilaku ---------------- */
@@ -256,7 +264,12 @@ fun SettingsScreen(state: AppState) {
                     subtitle = "File .md yang bisa dibuka di aplikasi lain",
                     icon = Icons.AutoMirrored.Filled.Article
                 ) {
-                    backup.exportMarkdown(Backup.toMarkdown(store.notes, store.categories))
+                    backup.exportMarkdown(
+                        Backup.toMarkdown(
+                            state.repo.exportableStore().notes,
+                            store.categories
+                        )
+                    )
                 }
 
                 LinkRow(

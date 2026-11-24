@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Print
@@ -168,7 +170,7 @@ fun rememberBackupActions(state: AppState): BackupActions {
         val repo = state.repo
         scope.launch(Dispatchers.IO) {
             val result = runCatching {
-                val text = Backup.encode(Backup.build(repo.current))
+                val text = Backup.encode(Backup.build(repo.exportableStore()))
                 val stream = context.contentResolver.openOutputStream(target)
                     ?: error("Tidak dapat menulis file backup.")
                 stream.use { out -> out.write(text.toByteArray(Charsets.UTF_8)) }
@@ -724,6 +726,17 @@ private fun NoteMenuModal(state: AppState, backup: BackupActions, modal: Modal.N
             state.toggleArchive(listOf(note.id), !note.isArchived)
         }
         MenuItem(
+            if (note.isLocked) Icons.Filled.LockOpen else Icons.Filled.Lock,
+            if (note.isLocked) "Buka kunci catatan" else "Kunci catatan",
+            "Catatan hanya bisa dibaca saat dikunci"
+        ) {
+            close()
+            repo.setNoteFlags(listOf(note.id), System.currentTimeMillis()) {
+                it.copy(isLocked = !note.isLocked)
+            }
+            state.showToast(if (note.isLocked) "Kunci catatan dilepas" else "Catatan dikunci")
+        }
+        MenuItem(
             Icons.Filled.Folder,
             "Pindahkan ke folder",
             sub = category?.name ?: "Tanpa folder"
@@ -751,7 +764,7 @@ private fun NoteMenuModal(state: AppState, backup: BackupActions, modal: Modal.N
         MenuItem(Icons.Filled.Share, "Bagikan") { shareNote() }
         MenuItem(Icons.AutoMirrored.Filled.Article, "Ekspor Markdown") {
             close()
-            backup.exportMarkdown(Backup.htmlToMarkdown(note.content))
+            backup.exportMarkdown(Backup.htmlToMarkdown(com.catatan.app.data.MediaStore.exportContent(note.content)))
         }
         MenuItem(Icons.Filled.Info, "Info catatan") { state.openModal(Modal.NoteInfo(note.id)) }
 

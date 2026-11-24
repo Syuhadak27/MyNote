@@ -286,6 +286,7 @@ object HtmlCodec {
     private fun safeSrc(src: String, kind: String): Boolean {
         if (src.isEmpty()) return false
         if (src.startsWith("http://") || src.startsWith("https://")) return true
+        if (src.startsWith(MediaStore.PREFIX)) return true
         val pattern = if (kind == "image")
             Regex("^data:image/(png|jpe?g|gif|webp);base64,", RegexOption.IGNORE_CASE)
         else

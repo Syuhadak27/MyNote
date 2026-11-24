@@ -60,11 +60,14 @@ import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Redo
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StrikethroughS
@@ -142,6 +145,7 @@ private val HIGHLIGHT_COLORS = listOf(
    ============================================================ */
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun EditorScreen(state: AppState) {
     val c = CatatanTheme.colors
     val context = LocalContext.current
@@ -156,6 +160,7 @@ fun EditorScreen(state: AppState) {
     var tags by remember(noteId) { mutableStateOf(note?.tags ?: emptyList()) }
     var saveStatus by remember(noteId) { mutableStateOf("saved") }
     var focusIndex by remember(noteId) { mutableIntStateOf(-1) }
+    var focusedBlockId by remember(noteId) { mutableStateOf<String?>(null) }
     var selection by remember(noteId) { mutableStateOf(0..0) }
     var focusMode by remember { mutableStateOf(false) }
     var tagInput by remember { mutableStateOf("") }
@@ -178,9 +183,55 @@ fun EditorScreen(state: AppState) {
     var tableHeader by remember { mutableStateOf(true) }
     var imageWidth by remember { mutableIntStateOf(100) }
     var imageAlt by remember { mutableStateOf("") }
+    var findOpen by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
+    var findIndex by remember { mutableIntStateOf(0) }
+    var blockMenuId by remember { mutableStateOf<String?>(null) }
+    val findBring = remember { BringIntoViewRequester() }
+
+    // Pastikan field yang sedang diketik tetap terlihat saat keyboard muncul.
+    val titleBring = remember { BringIntoViewRequester() }
+    val editorScope = rememberCoroutineScope()
+    val titleFocusModifier = Modifier
+        .bringIntoViewRequester(titleBring)
+        .onFocusChanged { focusState ->
+            if (focusState.isFocused) {
+                editorScope.launch { runCatching { titleBring.bringIntoView() } }
+            }
+        }
 
     val fontSize = state.settings.fontSize
     val fontFamily = fontFamilyOf(note?.font ?: state.settings.editorFont)
+    val locked = note?.isLocked ?: false
+    // Catatan terkunci: semua jalur edit dijaga lewat commitBlocks / judul / tag.
+
+    /** Indeks blok fokus: pakai ID supaya tetap benar setelah blok disisipkan/dihapus. */
+    fun resolvedFocusIndex(): Int {
+        val id = focusedBlockId ?: return focusIndex
+        val found = blocks.indexOfFirst { it.id == id }
+        return if (found >= 0) found else focusIndex
+    }
+
+    val findMatches = remember(findQuery, blocks) {
+        val needle = findQuery.trim()
+        if (needle.length < 2) emptyList()
+        else buildList {
+            blocks.forEachIndexed { i, b ->
+                val text = textOf(b) ?: ""
+                var from = 0
+                while (true) {
+                    val at = text.indexOf(needle, from, ignoreCase = true)
+                    if (at < 0) break
+                    add(Pair(i, at))
+                    from = at + needle.length
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(findIndex, findMatches) {
+        if (findMatches.isNotEmpty()) runCatching { findBring.bringIntoView() }
+    }
 
     fun persist() {
         val id = noteId ?: return
@@ -223,6 +274,7 @@ fun EditorScreen(state: AppState) {
     }
 
     fun commitBlocks(next: List<Block>) {
+        if (locked) return
         undoStack = (undoStack + listOf(blocks)).takeLast(40)
         redoStack = emptyList()
         blocks = next
@@ -247,7 +299,7 @@ fun EditorScreen(state: AppState) {
 
     fun insertBlocks(newBlocks: List<Block>) {
         if (newBlocks.isEmpty()) return
-        val at = if (focusIndex in blocks.indices) focusIndex + 1 else blocks.size
+        val at = if (resolvedFocusIndex() in blocks.indices) resolvedFocusIndex() + 1 else blocks.size
         commitBlocks(blocks.toMutableList().also { it.addAll(at, newBlocks) })
     }
 
@@ -256,14 +308,36 @@ fun EditorScreen(state: AppState) {
         commitBlocks(blocks.toMutableList().also { it[index] = block })
     }
 
+    fun duplicateBlock(id: String) {
+        if (locked) return
+        val i = blocks.indexOfFirst { it.id == id }
+        if (i !in blocks.indices) return
+        val clone = HtmlCodec.parse(HtmlCodec.serialize(listOf(blocks[i]))).firstOrNull() ?: return
+        commitBlocks(blocks.toMutableList().also { it.add(i + 1, clone) })
+    }
+
+    fun moveBlock(id: String, delta: Int) {
+        if (locked) return
+        val i = blocks.indexOfFirst { it.id == id }
+        if (i !in blocks.indices) return
+        val j = i + delta
+        if (j !in blocks.indices) return
+        val next = blocks.toMutableList()
+        val item = next.removeAt(i)
+        next.add(j, item)
+        commitBlocks(next)
+    }
+
     fun deleteBlock(index: Int) {
         if (index !in blocks.indices) return
+        val removed = blocks[index]
         commitBlocks(blocks.toMutableList().also { it.removeAt(index) })
         focusIndex = -1
+        if (focusedBlockId == removed.id) focusedBlockId = null
     }
 
     fun applyMark(type: MarkType, value: String? = null) {
-        val i = focusIndex
+        val i = resolvedFocusIndex()
         if (i !in blocks.indices) return
         val block = blocks[i]
         val text = textOf(block) ?: return
@@ -282,7 +356,7 @@ fun EditorScreen(state: AppState) {
     }
 
     fun clearFormat() {
-        val i = focusIndex
+        val i = resolvedFocusIndex()
         if (i !in blocks.indices) return
         val block = blocks[i]
         val text = textOf(block) ?: return
@@ -290,7 +364,7 @@ fun EditorScreen(state: AppState) {
     }
 
     fun setAlign(align: Int) {
-        val i = focusIndex
+        val i = resolvedFocusIndex()
         if (i !in blocks.indices) return
         when (val b = blocks[i]) {
             is Block.Paragraph -> replaceBlock(i, b.copy(align = align))
@@ -300,7 +374,7 @@ fun EditorScreen(state: AppState) {
     }
 
     fun changeStyle(style: String) {
-        val i = focusIndex
+        val i = resolvedFocusIndex()
         if (i !in blocks.indices) return
         val b = blocks[i]
         val text = textOf(b) ?: ""
@@ -318,6 +392,7 @@ fun EditorScreen(state: AppState) {
     }
 
     fun addTag(raw: String) {
+        if (locked) return
         val tag = raw.trim().lowercase(Locale.getDefault()).trimStart('#').replace(Regex("\\s+"), "-")
         if (tag.isEmpty()) return
         if (!tag.matches(Regex("^[\\p{L}\\p{N}_-]{1,30}$"))) {
@@ -353,7 +428,7 @@ fun EditorScreen(state: AppState) {
             val inserted = withContext(Dispatchers.Default) {
                 uris.mapNotNull { uri -> compressImage(context, uri) }
             }
-            insertBlocks(inserted.map { src -> Block.Image(src = src) })
+            insertBlocks(inserted.map { src -> Block.Image(src = com.catatan.app.data.MediaStore.save(src)) })
             moreDialog = false
         }
     }
@@ -412,6 +487,11 @@ fun EditorScreen(state: AppState) {
             },
             actions = {
                 AppIconButton(
+                    icon = Icons.Filled.Search,
+                    contentDescription = "Cari dalam catatan",
+                    onClick = { findOpen = true }
+                )
+                AppIconButton(
                     icon = Icons.Filled.CenterFocusStrong,
                     contentDescription = "Fokus",
                     onClick = { focusMode = !focusMode },
@@ -439,6 +519,100 @@ fun EditorScreen(state: AppState) {
                 )
             }
         )
+
+        if (findOpen) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(c.surface2)
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicTextField(
+                    value = findQuery,
+                    onValueChange = { findQuery = it; findIndex = 0 },
+                    singleLine = true,
+                    textStyle = TextStyle(color = c.text, fontSize = 13.sp),
+                    cursorBrush = SolidColor(c.accent),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(c.surface)
+                        .padding(horizontal = 10.dp, vertical = 7.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (findMatches.isEmpty()) "0/0" else "${findIndex + 1}/${findMatches.size}",
+                    color = c.text3,
+                    fontSize = 11.5.sp
+                )
+                AppIconButton(
+                    icon = Icons.Filled.KeyboardArrowUp,
+                    contentDescription = "Hasil sebelumnya",
+                    onClick = {
+                        if (findMatches.isNotEmpty()) {
+                            findIndex = (findIndex - 1 + findMatches.size) % findMatches.size
+                            val (bi, start) = findMatches[findIndex]
+                            focusedBlockId = blocks.getOrNull(bi)?.id
+                            selection = start..(start + findQuery.trim().length)
+                        }
+                    },
+                    size = 32.dp
+                )
+                AppIconButton(
+                    icon = Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "Hasil berikutnya",
+                    onClick = {
+                        if (findMatches.isNotEmpty()) {
+                            findIndex = (findIndex + 1) % findMatches.size
+                            val (bi, start) = findMatches[findIndex]
+                            focusedBlockId = blocks.getOrNull(bi)?.id
+                            selection = start..(start + findQuery.trim().length)
+                        }
+                    },
+                    size = 32.dp
+                )
+                AppIconButton(
+                    icon = Icons.Filled.Close,
+                    contentDescription = "Tutup pencarian",
+                    onClick = { findOpen = false; findQuery = "" },
+                    size = 32.dp
+                )
+            }
+        }
+
+        if (locked) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(c.accentSofter)
+                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = c.accentStrong,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    "Catatan dikunci · hanya baca",
+                    color = c.accentStrong,
+                    fontSize = 11.5.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                TextActionButton(
+                    "Buka kunci",
+                    onClick = {
+                        state.repo.setNoteFlags(listOf(note.id), System.currentTimeMillis()) {
+                            it.copy(isLocked = false)
+                        }
+                        state.showToast("Kunci catatan dilepas")
+                    }
+                )
+            }
+        }
 
         /* ---------------- Konten ---------------- */
         Column(
@@ -515,7 +689,7 @@ fun EditorScreen(state: AppState) {
                                 Modifier
                                     .size(14.dp)
                                     .clip(CircleShape)
-                                    .clickable { tags = tags - tag },
+                                    .clickable { if (!locked) tags = tags - tag },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -530,6 +704,7 @@ fun EditorScreen(state: AppState) {
                     BasicTextField(
                         value = tagInput,
                         onValueChange = { value ->
+                            if (locked) return@onValueChange
                             if (value.contains(',') || value.contains('\n')) {
                                 addTag(value.replace(',', ' ').trim())
                             } else {
@@ -537,6 +712,7 @@ fun EditorScreen(state: AppState) {
                             }
                         },
                         singleLine = true,
+                        readOnly = locked,
                         textStyle = TextStyle(color = c.text, fontSize = 11.5.sp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                         cursorBrush = SolidColor(c.accent),
@@ -577,8 +753,11 @@ fun EditorScreen(state: AppState) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     BasicTextField(
                         value = title,
-                        onValueChange = { title = it },
+                        onValueChange = { value ->
+                            if (!locked) title = value
+                        },
                         singleLine = true,
+                        readOnly = locked,
                         textStyle = TextStyle(
                             color = c.text,
                             fontSize = 27.sp,
@@ -586,7 +765,7 @@ fun EditorScreen(state: AppState) {
                             lineHeight = 34.sp
                         ),
                         cursorBrush = SolidColor(c.accent),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().then(titleFocusModifier)
                     ) { inner ->
                         if (title.isEmpty()) {
                             Text(
@@ -601,20 +780,53 @@ fun EditorScreen(state: AppState) {
                     Spacer(Modifier.height(10.dp))
 
                     blocks.forEachIndexed { index, block ->
+                        val matchHere = findMatches.getOrNull(findIndex)
+                        val markHere = if (findOpen && matchHere != null &&
+                            matchHere.first == index && findQuery.trim().isNotEmpty()
+                        ) {
+                            Mark(
+                                matchHere.second,
+                                matchHere.second + findQuery.trim().length,
+                                MarkType.HIGHLIGHT,
+                                "#fef08a"
+                            )
+                        } else null
                         BlockView(
                             block = block,
                             index = index,
                             fontSize = fontSize,
                             fontFamily = fontFamily,
+                            readOnly = locked,
+                            findMark = markHere,
+                            findBring = findBring,
+                            isFocused = focusedBlockId == block.id,
+                            onBlockMenu = { blockMenuId = block.id },
                             selection = selection,
                             onSelection = { range ->
                                 selection = range
                                 focusIndex = index
+                                focusedBlockId = blocks.getOrNull(index)?.id
                             },
                             onTextChange = { newText ->
                                 val b = blocks[index]
                                 val old = textOf(b) ?: ""
                                 val marks = marksOf(b) ?: emptyList()
+
+                                // Opsi "Entar buat blok baru": Enter memisah paragraf.
+                                if (state.settings.enterCreatesBlock && newText.contains('\n')) {
+                                    val parts = newText.split('\n', limit = 2)
+                                    val head = parts[0]
+                                    val tail = parts.getOrElse(1) { "" }
+                                    val newBlock = Block.Paragraph(text = tail)
+                                    val next = blocks.toMutableList()
+                                    next[index] = withMarks(b, head, shiftMarks(marks, old, head))
+                                    next.add(index + 1, newBlock)
+                                    commitBlocks(next)
+                                    focusedBlockId = newBlock.id
+                                    selection = 0..0
+                                    return@onTextChange
+                                }
+
                                 val nextMarks = shiftMarks(marks, old, newText)
                                 commitBlocks(
                                     blocks.toMutableList().also {
@@ -622,6 +834,7 @@ fun EditorScreen(state: AppState) {
                                     }
                                 )
                                 focusIndex = index
+                                focusedBlockId = b.id
                             },
                             onDelete = { deleteBlock(index) },
                             onImageClick = {
@@ -733,8 +946,11 @@ fun EditorScreen(state: AppState) {
                             .fillMaxWidth()
                             .height(56.dp)
                             .clickable {
-                                insertBlocks(listOf(Block.Paragraph()))
-                                focusIndex = blocks.size - 1
+                                if (locked) return@clickable
+                                val newBlock = Block.Paragraph()
+                                insertBlocks(listOf(newBlock))
+                                focusedBlockId = newBlock.id
+                                selection = 0..0
                             }
                     )
 
@@ -768,38 +984,39 @@ fun EditorScreen(state: AppState) {
             Spacer(Modifier.height(24.dp))
         }
 
-        /* ---------------- Toolbar ---------------- */
-        Row(
+        /* ---------------- Toolbar (dua baris) ---------------- */
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(c.bg.copy(alpha = 0.94f))
                 .navigationBarsPadding()
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .padding(horizontal = 10.dp, vertical = 5.dp)
         ) {
+            // Baris 1 — format teks
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(7.dp, RoundedCornerShape(15.dp))
-                    .clip(RoundedCornerShape(15.dp))
+                    .shadow(6.dp, RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(c.surface.copy(alpha = 0.96f))
-                    .border(1.dp, c.border, RoundedCornerShape(15.dp))
+                    .border(1.dp, c.border, RoundedCornerShape(14.dp))
                     .horizontalScroll(rememberScrollState())
-                    .padding(4.dp),
+                    .padding(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                ToolButton(Icons.Filled.Undo, "Urungkan", undoStack.isNotEmpty()) { undo() }
-                ToolButton(Icons.Filled.Redo, "Ulangi", redoStack.isNotEmpty()) { redo() }
+                ToolButton(Icons.Filled.Undo, "Urungkan", !locked && undoStack.isNotEmpty()) { undo() }
+                ToolButton(Icons.Filled.Redo, "Ulangi", !locked && redoStack.isNotEmpty()) { redo() }
                 Spacer(Modifier.width(4.dp))
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(9.dp))
                         .background(c.accentSofter)
-                        .clickable { styleDialog = true }
+                        .clickable(enabled = !locked) { styleDialog = true }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(styleLabel(blocks.getOrNull(focusIndex)), color = c.accentStrong, fontSize = 11.sp)
+                    Text(styleLabel(blocks.getOrNull(resolvedFocusIndex())), color = c.accentStrong, fontSize = 11.sp)
                     Icon(
                         Icons.Filled.KeyboardArrowDown,
                         contentDescription = null,
@@ -808,33 +1025,86 @@ fun EditorScreen(state: AppState) {
                     )
                 }
                 Spacer(Modifier.width(4.dp))
-                ToolButton(Icons.Filled.FormatBold, "Tebal", true) { applyMark(MarkType.BOLD) }
-                ToolButton(Icons.Filled.FormatItalic, "Miring", true) { applyMark(MarkType.ITALIC) }
-                ToolButton(Icons.Filled.FormatUnderlined, "Garis bawah", true) { applyMark(MarkType.UNDERLINE) }
-                ToolButton(Icons.Filled.StrikethroughS, "Coret", true) { applyMark(MarkType.STRIKE) }
-                ToolButton(Icons.Filled.FormatColorText, "Warna", true) { colorDialog = true }
-                ToolButton(Icons.Filled.Highlight, "Sorotan", true) { colorDialog = true }
-                Spacer(Modifier.width(4.dp))
-                ToolButton(Icons.Filled.Checklist, "Checklist", true) {
+                ToolButton(Icons.Filled.FormatBold, "Tebal", !locked) { applyMark(MarkType.BOLD) }
+                ToolButton(Icons.Filled.FormatItalic, "Miring", !locked) { applyMark(MarkType.ITALIC) }
+                ToolButton(Icons.Filled.FormatUnderlined, "Garis bawah", !locked) { applyMark(MarkType.UNDERLINE) }
+                ToolButton(Icons.Filled.StrikethroughS, "Coret", !locked) { applyMark(MarkType.STRIKE) }
+                ToolButton(Icons.Filled.FormatColorText, "Warna", !locked) { colorDialog = true }
+                ToolButton(Icons.Filled.Highlight, "Sorotan", !locked) { colorDialog = true }
+                ToolButton(Icons.Filled.Close, "Bersihkan format", !locked) { clearFormat() }
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            // Baris 2 — sisipan konten
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(c.surface.copy(alpha = 0.94f))
+                    .border(1.dp, c.border, RoundedCornerShape(14.dp))
+                    .horizontalScroll(rememberScrollState())
+                    .padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                ToolButton(Icons.Filled.Checklist, "Checklist", !locked) {
                     insertBlocks(listOf(Block.Checklist(items = listOf(CheckItem()))))
                 }
-                ToolButton(Icons.Filled.FormatListBulleted, "Daftar", true) {
+                ToolButton(Icons.Filled.FormatListBulleted, "Daftar", !locked) {
                     insertBlocks(listOf(Block.BulletList(items = listOf(ListItem()))))
                 }
-                ToolButton(Icons.Filled.FormatListNumbered, "Nomor", true) {
+                ToolButton(Icons.Filled.FormatListNumbered, "Nomor", !locked) {
                     insertBlocks(listOf(Block.NumberedList(items = listOf(ListItem()))))
                 }
-                ToolButton(Icons.Filled.Link, "Tautan", true) {
+                ToolButton(Icons.Filled.Link, "Tautan", !locked) {
                     linkUrl = ""
                     linkLabel = ""
                     linkDialog = true
                 }
+                ToolButton(Icons.Filled.Image, "Gambar", !locked) { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+                ToolButton(Icons.Filled.Gesture, "Gambar tangan", !locked) { showDrawing = true }
+                ToolButton(Icons.Filled.Mic, "Rekam audio", !locked) { showAudio = true }
+                ToolButton(Icons.Filled.TableChart, "Tabel", !locked) { tableDialog = true }
+                ToolButton(Icons.Filled.FormatQuote, "Kutipan", !locked) { insertBlocks(listOf(Block.Quote())) }
+                ToolButton(Icons.Filled.Code, "Kode", !locked) { insertBlocks(listOf(Block.Code())) }
+                ToolButton(Icons.Filled.HorizontalRule, "Garis", !locked) { insertBlocks(listOf(Block.Divider())) }
                 ToolButton(Icons.Filled.MoreHoriz, "Alat lainnya", true) { moreDialog = true }
             }
         }
     }
 
     /* ---------------- Dialog lokal ---------------- */
+
+    blockMenuId?.let { id ->
+        val i = blocks.indexOfFirst { it.id == id }
+        if (i >= 0) {
+            AppModal(
+                title = "Menu blok",
+                subtitle = "Atur paragraf yang sedang disunting",
+                onClose = { blockMenuId = null }
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    TextActionButton("Duplikat blok", onClick = {
+                        duplicateBlock(id)
+                        blockMenuId = null
+                    }, accent = true)
+                    TextActionButton("Pindah ke atas", onClick = {
+                        moveBlock(id, -1)
+                        blockMenuId = null
+                    })
+                    TextActionButton("Pindah ke bawah", onClick = {
+                        moveBlock(id, 1)
+                        blockMenuId = null
+                    })
+                    TextActionButton("Hapus blok", onClick = {
+                        deleteBlock(i)
+                        blockMenuId = null
+                    })
+                }
+            }
+        }
+    }
 
     if (styleDialog) {
         AppModal(title = "Gaya blok", subtitle = "Ubah jenis paragraf yang dipilih", onClose = { styleDialog = false }) {
@@ -897,7 +1167,7 @@ fun EditorScreen(state: AppState) {
                     confirmText = "Sisipkan",
                     onConfirm = {
                         if (linkUrl.isNotBlank()) {
-                            val i = focusIndex
+                            val i = resolvedFocusIndex()
                             val block = blocks.getOrNull(i)
                             val text = textOf(block ?: Block.Paragraph())
                             if (text != null && selection.first != selection.last) {
@@ -1022,7 +1292,7 @@ fun EditorScreen(state: AppState) {
                 Triple(
                     Icons.Filled.Delete,
                     "Hapus blok",
-                    { if (focusIndex in blocks.indices) deleteBlock(focusIndex); true }
+                    { val i = resolvedFocusIndex(); if (i in blocks.indices) deleteBlock(i); true }
                 )
             )
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -1096,7 +1366,7 @@ fun EditorScreen(state: AppState) {
         DrawingModal(
             onDismiss = { showDrawing = false },
             onInsert = { url ->
-                insertBlocks(listOf(Block.Image(src = url, drawing = true)))
+                insertBlocks(listOf(Block.Image(src = com.catatan.app.data.MediaStore.save(url), drawing = true)))
                 showDrawing = false
             }
         )
@@ -1106,7 +1376,7 @@ fun EditorScreen(state: AppState) {
         AudioModal(
             onDismiss = { showAudio = false },
             onInsert = { url ->
-                insertBlocks(listOf(Block.Audio(src = url)))
+                insertBlocks(listOf(Block.Audio(src = com.catatan.app.data.MediaStore.save(url))))
                 showAudio = false
             }
         )
@@ -1204,6 +1474,11 @@ private fun BlockView(
     index: Int,
     fontSize: Int,
     fontFamily: FontFamily,
+    readOnly: Boolean,
+    findMark: Mark?,
+    findBring: BringIntoViewRequester,
+    isFocused: Boolean,
+    onBlockMenu: () -> Unit,
     selection: IntRange,
     onSelection: (IntRange) -> Unit,
     onTextChange: (String) -> Unit,
@@ -1239,10 +1514,11 @@ private fun BlockView(
                 is Block.Heading -> block.align
                 else -> 0
             }
-            val annotated = styled(text, marks, c.text)
+            val annotated = styled(text, marks + listOfNotNull(findMark), c.text)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(if (findMark != null) Modifier.bringIntoViewRequester(findBring) else Modifier)
                     .then(
                         if (isCode || isQuote) {
                             Modifier
@@ -1265,6 +1541,7 @@ private fun BlockView(
                             onTextChange(value.text)
                             onSelection(value.selection.min..value.selection.max)
                         },
+                        readOnly = readOnly,
                         textStyle = TextStyle(
                             fontSize = when {
                                 isHeading -> (fontSize + when ((block as Block.Heading).level) {
@@ -1285,6 +1562,19 @@ private fun BlockView(
                         cursorBrush = SolidColor(c.accent),
                         modifier = Modifier.fillMaxWidth().then(focusBring)
                     )
+                    if (isFocused && !readOnly) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            AppIconButton(
+                                icon = Icons.Filled.MoreVert,
+                                contentDescription = "Menu blok",
+                                onClick = onBlockMenu,
+                                size = 22.dp
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1322,6 +1612,7 @@ private fun BlockView(
                             onCheckText(itemIndex, value.text)
                             if (value.text.isEmpty() && itemIndex > 0) onCheckBackspace(itemIndex)
                         },
+                        readOnly = readOnly,
                         textStyle = TextStyle(
                             fontSize = fontSize.sp,
                             fontFamily = fontFamily,
@@ -1354,6 +1645,7 @@ private fun BlockView(
                         BasicTextField(
                             value = TextFieldValue(annotatedString = annotatedListItem),
                             onValueChange = { value -> onListItemText(itemIndex, value.text) },
+                            readOnly = readOnly,
                             textStyle = TextStyle(
                                 fontSize = fontSize.sp,
                                 fontFamily = fontFamily,
@@ -1420,6 +1712,7 @@ private fun BlockView(
                         BasicTextField(
                             value = cell,
                             onValueChange = { onTableCell(r, col, it) },
+                            readOnly = readOnly,
                             textStyle = TextStyle(
                                 color = if (block.header && r == 0) c.text else c.text2,
                                 fontSize = 12.5.sp,
@@ -1428,6 +1721,7 @@ private fun BlockView(
                             cursorBrush = SolidColor(c.accent),
                             modifier = Modifier
                                 .weight(1f)
+                                .then(focusBring)
                                 .background(if (block.header && r == 0) c.surface2 else Color.Transparent)
                                 .padding(8.dp)
                         )
@@ -1494,11 +1788,14 @@ private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedStrin
 private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {
     val bitmap by androidx.compose.runtime.produceState<ImageBitmap?>(initialValue = null, dataUrl) {
         value = runCatching {
-            val b64 = dataUrl.substringAfter("base64,", "")
-            if (b64.isEmpty()) null else {
-                val bytes = Base64.decode(b64, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            val bytes = if (dataUrl.startsWith(com.catatan.app.data.MediaStore.PREFIX)) {
+                com.catatan.app.data.MediaStore.fileFor(dataUrl)?.readBytes() ?: return@runCatching null
+            } else {
+                val b64 = dataUrl.substringAfter("base64,", "")
+                if (b64.isEmpty()) return@runCatching null
+                Base64.decode(b64, Base64.DEFAULT)
             }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
         }.getOrNull()
     }
     if (bitmap != null) {

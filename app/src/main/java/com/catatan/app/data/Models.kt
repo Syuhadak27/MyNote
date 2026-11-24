@@ -68,6 +68,7 @@ data class AppSettings(
     val autoPurgeTrash: Boolean = true,
     val moveChecked: Boolean = false,
     val spellcheck: Boolean = true,
+    val enterCreatesBlock: Boolean = false,
     val lastBackupAt: Long = 0,
     val recentSearches: List<String> = emptyList()
 )

@@ -86,6 +86,13 @@ class Repo(context: Context) {
 
     fun note(id: String): Note? = current.notes.firstOrNull { it.id == id }
 
+    /** Store untuk backup: media lokal dikembalikan ke data URL (kompatibel web). */
+    fun exportableStore(): Store = current.copy(
+        notes = current.notes.map { note ->
+            note.copy(content = MediaStore.exportContent(note.content))
+        }
+    )
+
     fun upsertNote(note: Note) = mutate { s ->
         s.copy(notes = if (s.notes.any { it.id == note.id }) {
             s.notes.map { if (it.id == note.id) note else it }

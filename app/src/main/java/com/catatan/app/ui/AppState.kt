@@ -14,6 +14,7 @@ import com.catatan.app.data.AppSettings
 import com.catatan.app.data.Backup
 import com.catatan.app.data.BackupSummary
 import com.catatan.app.data.Category
+import com.catatan.app.data.MediaStore
 import com.catatan.app.data.Note
 import com.catatan.app.data.Repo
 import com.catatan.app.data.Revision
@@ -343,7 +344,12 @@ class AppState(val repo: Repo, val appContext: Context) {
     /* --- Impor backup --- */
 
     fun applyImport(summary: BackupSummary, mode: String) {
-        val incoming = Backup.toStore(summary.file, mode, repo.current)
+        val parsed = Backup.toStore(summary.file, mode, repo.current)
+        val incoming = parsed.copy(
+            notes = parsed.notes.map { note ->
+                note.copy(content = MediaStore.importContent(note.content))
+            }
+        )
         if (mode == "replace") repo.replaceAll(incoming) else repo.mergeAll(incoming)
         repo.purgeExpiredTrash()
         exitSelection()

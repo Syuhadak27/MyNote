@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PushPin
@@ -307,6 +308,7 @@ fun NoteRow(
                     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         if (note.isPinned) MiniBadge(Icons.Filled.PushPin, "Disematkan", c.accentSoft, c.accentStrong)
                         if (note.isFavorite) MiniBadge(Icons.Filled.Star, "Favorit", Color(0x29F5B428), Color(0xFFC78A0A))
+                        if (note.isLocked) MiniBadge(Icons.Filled.Lock, "Dikunci", c.accentSofter, c.accentStrong)
                         if (HtmlCodec.hasAudio(note.content)) MiniBadge(Icons.Filled.Mic, "Rekaman", c.surface3, c.text2)
                     }
                 }
@@ -376,7 +378,9 @@ fun NoteRow(
                         .border(1.dp, c.border, RoundedCornerShape(9.dp))
                 ) {
                     AsyncImage(
-                        model = HtmlCodec.firstImageSrc(note.content),
+                        model = com.catatan.app.data.MediaStore.fileFor(
+                            HtmlCodec.firstImageSrc(note.content)
+                        ) ?: HtmlCodec.firstImageSrc(note.content),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -523,6 +527,7 @@ fun NoteGridCard(
                 Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     if (note.isPinned) MiniBadge(Icons.Filled.PushPin, "Disematkan", c.accentSoft, c.accentStrong)
                     if (note.isFavorite) MiniBadge(Icons.Filled.Star, "Favorit", Color(0x29F5B428), Color(0xFFC78A0A))
+                    if (note.isLocked) MiniBadge(Icons.Filled.Lock, "Dikunci", c.accentSofter, c.accentStrong)
                 }
             }
 
@@ -547,7 +552,9 @@ fun NoteGridCard(
                         .background(c.surface2)
                 ) {
                     AsyncImage(
-                        model = HtmlCodec.firstImageSrc(note.content),
+                        model = com.catatan.app.data.MediaStore.fileFor(
+                            HtmlCodec.firstImageSrc(note.content)
+                        ) ?: HtmlCodec.firstImageSrc(note.content),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop

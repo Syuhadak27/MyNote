@@ -84,6 +84,7 @@ object Backup {
         BackupSettingRow("autoPurgeTrash", JsonPrimitive(s.autoPurgeTrash)),
         BackupSettingRow("moveChecked", JsonPrimitive(s.moveChecked)),
         BackupSettingRow("spellcheck", JsonPrimitive(s.spellcheck)),
+        BackupSettingRow("enterCreatesBlock", JsonPrimitive(s.enterCreatesBlock)),
         BackupSettingRow("lastBackupAt", JsonPrimitive(s.lastBackupAt)),
         BackupSettingRow(
             "recentSearches",
@@ -245,6 +246,7 @@ object Backup {
             autoPurgeTrash = bool("autoPurgeTrash", fallback.autoPurgeTrash),
             moveChecked = bool("moveChecked", fallback.moveChecked),
             spellcheck = bool("spellcheck", fallback.spellcheck),
+            enterCreatesBlock = bool("enterCreatesBlock", fallback.enterCreatesBlock),
             lastBackupAt = raw("lastBackupAt")?.toLongOrNull() ?: fallback.lastBackupAt,
             recentSearches = recent
         )
