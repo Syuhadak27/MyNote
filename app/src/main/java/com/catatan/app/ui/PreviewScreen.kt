@@ -362,14 +362,14 @@ private fun marked(text: String, marks: List<Mark>, accent: Color): androidx.com
 private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {
     val bmp by produceState<ImageBitmap?>(initialValue = null, dataUrl) {
         value = runCatching {
-            val bytes = if (dataUrl.startsWith(com.catatan.app.data.MediaStore.PREFIX)) {
-                com.catatan.app.data.MediaStore.fileFor(dataUrl)?.readBytes() ?: return@runCatching null
+            val bytes: ByteArray? = if (dataUrl.startsWith(com.catatan.app.data.MediaStore.PREFIX)) {
+                com.catatan.app.data.MediaStore.fileFor(dataUrl)?.readBytes()
             } else {
                 val b64 = dataUrl.substringAfter("base64,", "")
-                if (b64.isEmpty()) return@runCatching null
-                android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                if (b64.isEmpty()) null else android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
             }
-            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            if (bytes == null) null
+            else android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
         }.getOrNull()
     }
     bmp?.let { Image(it, contentDescription = null, modifier = modifier) }

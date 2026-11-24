@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Search
@@ -704,11 +705,12 @@ fun EditorScreen(state: AppState) {
                     BasicTextField(
                         value = tagInput,
                         onValueChange = { value ->
-                            if (locked) return@onValueChange
-                            if (value.contains(',') || value.contains('\n')) {
-                                addTag(value.replace(',', ' ').trim())
-                            } else {
-                                tagInput = value
+                            if (!locked) {
+                                if (value.contains(',') || value.contains('\n')) {
+                                    addTag(value.replace(',', ' ').trim())
+                                } else {
+                                    tagInput = value
+                                }
                             }
                         },
                         singleLine = true,
@@ -824,17 +826,16 @@ fun EditorScreen(state: AppState) {
                                     commitBlocks(next)
                                     focusedBlockId = newBlock.id
                                     selection = 0..0
-                                    return@onTextChange
+                                } else {
+                                    val nextMarks = shiftMarks(marks, old, newText)
+                                    commitBlocks(
+                                        blocks.toMutableList().also {
+                                            it[index] = withMarks(b, newText, nextMarks)
+                                        }
+                                    )
+                                    focusIndex = index
+                                    focusedBlockId = b.id
                                 }
-
-                                val nextMarks = shiftMarks(marks, old, newText)
-                                commitBlocks(
-                                    blocks.toMutableList().also {
-                                        it[index] = withMarks(b, newText, nextMarks)
-                                    }
-                                )
-                                focusIndex = index
-                                focusedBlockId = b.id
                             },
                             onDelete = { deleteBlock(index) },
                             onImageClick = {
@@ -946,11 +947,12 @@ fun EditorScreen(state: AppState) {
                             .fillMaxWidth()
                             .height(56.dp)
                             .clickable {
-                                if (locked) return@clickable
-                                val newBlock = Block.Paragraph()
-                                insertBlocks(listOf(newBlock))
-                                focusedBlockId = newBlock.id
-                                selection = 0..0
+                                if (!locked) {
+                                    val newBlock = Block.Paragraph()
+                                    insertBlocks(listOf(newBlock))
+                                    focusedBlockId = newBlock.id
+                                    selection = 0..0
+                                }
                             }
                     )
 
@@ -1788,14 +1790,14 @@ private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedStrin
 private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {
     val bitmap by androidx.compose.runtime.produceState<ImageBitmap?>(initialValue = null, dataUrl) {
         value = runCatching {
-            val bytes = if (dataUrl.startsWith(com.catatan.app.data.MediaStore.PREFIX)) {
-                com.catatan.app.data.MediaStore.fileFor(dataUrl)?.readBytes() ?: return@runCatching null
+            val bytes: ByteArray? = if (dataUrl.startsWith(com.catatan.app.data.MediaStore.PREFIX)) {
+                com.catatan.app.data.MediaStore.fileFor(dataUrl)?.readBytes()
             } else {
                 val b64 = dataUrl.substringAfter("base64,", "")
-                if (b64.isEmpty()) return@runCatching null
-                Base64.decode(b64, Base64.DEFAULT)
+                if (b64.isEmpty()) null else Base64.decode(b64, Base64.DEFAULT)
             }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            if (bytes == null) null
+            else BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
         }.getOrNull()
     }
     if (bitmap != null) {

@@ -24,23 +24,25 @@ object MediaStore {
     private fun dir(): File = File(appContext.filesDir, "media")
 
     /** Simpan data URL, kembalikan penunjuk lokal. */
-    fun save(dataUrl: String): String = try {
+    fun save(dataUrl: String): String {
         val comma = dataUrl.indexOf(',')
         if (comma < 0) return dataUrl
-        val meta = dataUrl.substring(0, comma).lowercase()
-        val bytes = Base64.decode(dataUrl.substring(comma + 1), Base64.DEFAULT)
-        val ext = when {
-            meta.contains("image/png") -> "png"
-            meta.contains("image/") -> "jpg"
-            meta.contains("audio/mp4") || meta.contains("audio/mpeg") -> "m4a"
-            meta.contains("audio/") -> "aac"
-            else -> "bin"
+        return try {
+            val meta = dataUrl.substring(0, comma).lowercase()
+            val bytes = Base64.decode(dataUrl.substring(comma + 1), Base64.DEFAULT)
+            val ext = when {
+                meta.contains("image/png") -> "png"
+                meta.contains("image/") -> "jpg"
+                meta.contains("audio/mp4") || meta.contains("audio/mpeg") -> "m4a"
+                meta.contains("audio/") -> "aac"
+                else -> "bin"
+            }
+            val name = "m-${System.currentTimeMillis()}-${(Math.random() * 1_000_000).toInt()}.$ext"
+            File(dir(), name).writeBytes(bytes)
+            PREFIX + name
+        } catch (_: Exception) {
+            dataUrl
         }
-        val name = "m-${System.currentTimeMillis()}-${(Math.random() * 1_000_000).toInt()}.$ext"
-        File(dir(), name).writeBytes(bytes)
-        PREFIX + name
-    } catch (_: Exception) {
-        dataUrl
     }
 
     fun fileFor(src: String): File? =
