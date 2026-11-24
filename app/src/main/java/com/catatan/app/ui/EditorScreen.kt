@@ -150,7 +150,7 @@ fun EditorScreen(state: AppState) {
     var tags by remember(noteId) { mutableStateOf(note?.tags ?: emptyList()) }
     var saveStatus by remember(noteId) { mutableStateOf("saved") }
     var focusIndex by remember(noteId) { mutableIntStateOf(-1) }
-    var selection by remember(noteId) { mutableStateOf(IntRange.ZERO) }
+    var selection by remember(noteId) { mutableStateOf(0..0) }
     var focusMode by remember { mutableStateOf(false) }
     var tagInput by remember { mutableStateOf("") }
 

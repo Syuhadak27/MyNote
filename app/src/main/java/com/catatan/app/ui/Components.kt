@@ -541,7 +541,7 @@ fun LinkRow(
             }
         }
         Icon(
-            KeyboardArrowRight,
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = c.text3,
             modifier = Modifier.size(18.dp)

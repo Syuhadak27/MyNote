@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
@@ -300,10 +301,12 @@ private fun ListList(
             when (e) {
                 is RowEntry.Header -> "h:${e.label}"
                 is RowEntry.NoteEntry -> e.note.id
+                else -> "card"
             }
         }) { _, entry ->
             when (entry) {
                 is RowEntry.Header -> GroupHeader(entry.label, entry.count)
+                is RowEntry.CardPair -> Unit
                 is RowEntry.NoteEntry -> {
                     val note = entry.note
                     val cat = note.categoryId?.let { catMap[it] }

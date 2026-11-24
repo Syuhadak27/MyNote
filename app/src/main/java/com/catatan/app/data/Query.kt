@@ -261,7 +261,7 @@ object Query {
                 val ts = if (trashView) (n.deletedAt ?: n.updatedAt) else n.updatedAt
                 groups.getOrPut(dateGroupLabel(ts)) { mutableListOf() }.add(n)
             }
-            out.addAll(groups)
+            out.addAll(groups.map { (label, list) -> label to list })
         }
         return out
     }
