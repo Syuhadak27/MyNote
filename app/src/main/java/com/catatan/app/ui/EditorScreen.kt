@@ -1495,7 +1495,7 @@ private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {
         }.getOrNull()
     }
     if (bitmap != null) {
-        Image(bitmap, contentDescription = null, modifier = modifier)
+        Image(bitmap!!, contentDescription = null, modifier = modifier)
     } else {
         Box(modifier.background(CatatanTheme.colors.surface2))
     }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -55,6 +56,7 @@ import com.catatan.app.ui.theme.CatatanTheme
 import com.catatan.app.util.noteTimeLabel
 import com.catatan.app.util.relativeTime
 import com.catatan.app.util.trashDaysLeft
+import coil.compose.AsyncImage
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -373,7 +375,7 @@ fun NoteRow(
                         .clip(RoundedCornerShape(9.dp))
                         .border(1.dp, c.border, RoundedCornerShape(9.dp))
                 ) {
-                    androidx.compose.foundation.Image(
+                    AsyncImage(
                         model = HtmlCodec.firstImageSrc(note.content),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
@@ -518,7 +520,7 @@ fun NoteGridCard(
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(5.dp))
-                Column(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     if (note.isPinned) MiniBadge(Icons.Filled.PushPin, "Disematkan", c.accentSoft, c.accentStrong)
                     if (note.isFavorite) MiniBadge(Icons.Filled.Star, "Favorit", Color(0x29F5B428), Color(0xFFC78A0A))
                 }
@@ -544,7 +546,7 @@ fun NoteGridCard(
                         .clip(RoundedCornerShape(9.dp))
                         .background(c.surface2)
                 ) {
-                    androidx.compose.foundation.Image(
+                    AsyncImage(
                         model = HtmlCodec.firstImageSrc(note.content),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),

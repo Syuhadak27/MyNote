@@ -80,6 +80,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.catatan.app.BuildConfig
 import com.catatan.app.data.Backup
+import com.catatan.app.data.Block
 import com.catatan.app.data.Category
 import com.catatan.app.data.HtmlCodec
 import com.catatan.app.data.Query
@@ -134,7 +136,7 @@ fun folderIconVector(name: String): ImageVector = when (name) {
     "notes" -> Icons.AutoMirrored.Filled.Notes
     "star" -> Icons.Filled.Star
     "tag" -> Icons.Filled.Tag
-    "home" -> Icons.Filled.Article
+    "home" -> Icons.AutoMirrored.Filled.Article
     "archive" -> Icons.Filled.Archive
     "image" -> Icons.Filled.Image
     "calendar" -> Icons.Filled.CalendarToday
@@ -1883,5 +1885,59 @@ private fun ReleaseRow(label: String, value: String) {
         Text(label, color = c.text3, fontSize = 11.sp, fontWeight = FontWeight.W600)
         Spacer(Modifier.height(3.dp))
         Text(value, color = c.text, fontSize = 13.sp, lineHeight = 19.sp)
+    }
+}
+
+/* ============================================================
+   Pratinjau isi versi lama (baca saja)
+   ============================================================ */
+
+@Composable
+private fun PreviewBlockList(blocks: List<Block>, plainTextColor: Color) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        blocks.forEach { block ->
+            when (block) {
+                is Block.Paragraph -> Text(
+                    block.text, color = plainTextColor,
+                    fontSize = 14.sp, lineHeight = 21.sp
+                )
+                is Block.Heading -> Text(
+                    block.text, color = plainTextColor,
+                    fontSize = when (block.level) { 1 -> 20.sp; 2 -> 17.sp; else -> 15.sp },
+                    fontWeight = FontWeight.W700
+                )
+                is Block.Quote -> Text(
+                    block.text, color = plainTextColor,
+                    fontSize = 14.sp, fontStyle = FontStyle.Italic
+                )
+                is Block.Code -> Text(
+                    block.text, color = plainTextColor,
+                    fontSize = 12.5.sp, fontFamily = FontFamily.Monospace
+                )
+                is Block.Checklist -> block.items.forEach { item ->
+                    Text(
+                        (if (item.done) "✓ " else "○ ") + item.text,
+                        color = plainTextColor, fontSize = 13.sp
+                    )
+                }
+                is Block.BulletList -> block.items.forEach { item ->
+                    Text("• ${item.text}", color = plainTextColor, fontSize = 13.sp)
+                }
+                is Block.NumberedList -> block.items.forEachIndexed { i, item ->
+                    Text("${i + 1}. ${item.text}", color = plainTextColor, fontSize = 13.sp)
+                }
+                is Block.Divider -> AppDivider()
+                is Block.Image -> Text(
+                    "[Gambar]", color = plainTextColor.copy(alpha = 0.6f), fontSize = 12.sp
+                )
+                is Block.Audio -> Text(
+                    "[Rekaman audio]", color = plainTextColor.copy(alpha = 0.6f), fontSize = 12.sp
+                )
+                is Block.Table -> block.rows.forEach { row ->
+                    Text(row.joinToString("  |  "), color = plainTextColor, fontSize = 12.sp)
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
     }
 }
