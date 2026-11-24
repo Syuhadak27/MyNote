@@ -40,7 +40,15 @@ jobs:
           echo "Versi build: $VERSION"
 
       - name: Build APK release (signed)
-        run: gradle :app:assembleRelease --no-daemon -PversionName=${{ steps.ver.outputs.name }} -PversionCode=${{ github.run_number }}
+        id: build
+        run: |
+          set -o pipefail
+          gradle :app:assembleRelease --no-daemon -PversionName=${{ steps.ver.outputs.name }} -PversionCode=${{ github.run_number }} 2>&1 | tee build.log
+
+      - name: Laporkan error build sebagai anotasi
+        if: failure() && steps.build.outcome == 'failure'
+        run: |
+          grep -E "^(e: |.*error:|FAILURE:|Execution failed|> Task .* FAILED|Caused by:|  [A-Za-z].*\.kt:)" build.log | head -120 | while IFS= read -r line; do echo "::error::${line}"; done || true
 
       - name: Siapkan artefak
         run: |
