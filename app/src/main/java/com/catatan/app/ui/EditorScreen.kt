@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,6 +85,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
@@ -1213,6 +1216,15 @@ private fun BlockView(
     onTableCell: (Int, Int, String) -> Unit
 ) {
     val c = CatatanTheme.colors
+    val bringRequester = remember { BringIntoViewRequester() }
+    val blockScope = rememberCoroutineScope()
+    val focusBring = Modifier
+        .bringIntoViewRequester(bringRequester)
+        .onFocusChanged { focusState ->
+            if (focusState.isFocused) {
+                blockScope.launch { runCatching { bringRequester.bringIntoView() } }
+            }
+        }
     when (block) {
         is Block.Paragraph, is Block.Heading, is Block.Quote, is Block.Code -> {
             val text = textOf(block) ?: ""
@@ -1269,7 +1281,7 @@ private fun BlockView(
                             lineHeight = (fontSize * 1.5).sp
                         ),
                         cursorBrush = SolidColor(c.accent),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().then(focusBring)
                     )
                 }
             }
@@ -1315,7 +1327,7 @@ private fun BlockView(
                             textDecoration = if (item.done) TextDecoration.LineThrough else null
                         ),
                         cursorBrush = SolidColor(c.accent),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).then(focusBring)
                     )
                 }
             }
@@ -1346,7 +1358,7 @@ private fun BlockView(
                                 lineHeight = (fontSize * 1.45).sp
                             ),
                             cursorBrush = SolidColor(c.accent),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).then(focusBring)
                         )
                     }
                 }
