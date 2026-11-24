@@ -3,6 +3,7 @@ package com.catatan.app.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -363,15 +365,10 @@ private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {
             val b64 = dataUrl.substringAfter("base64,", "")
             if (b64.isEmpty()) null else {
                 val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.let {
-                    androidx.compose.ui.graphics.asImageBitmap(it)
-                }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
             }
         }.getOrNull()
     }
-    if (bmp != null) {
-        Image(bmp, contentDescription = null, modifier = modifier)
-    } else {
-        Box(modifier.background(CatatanTheme.colors.surface2))
-    }
+    bmp?.let { Image(it, contentDescription = null, modifier = modifier) }
+        ?: Box(modifier.background(CatatanTheme.colors.surface2))
 }
