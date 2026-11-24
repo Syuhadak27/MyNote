@@ -119,6 +119,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.util.Locale
+import kotlin.math.max
 import kotlin.math.min
 
 private const val SAVE_DEBOUNCE_MS = 650L
@@ -361,6 +362,7 @@ fun EditorScreen(state: AppState) {
     Column(modifier = Modifier.fillMaxSize().background(c.bg)) {
         /* ---------------- Appbar ---------------- */
         CatatanTopBar(
+            title = "Editor",
             navigationIcon = {
                 AppIconButton(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
@@ -1217,6 +1219,7 @@ private fun BlockView(
                 is Block.Heading -> block.align
                 else -> 0
             }
+            val annotated = styled(text, marks, c.text)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1232,7 +1235,7 @@ private fun BlockView(
                 Column {
                     BasicTextField(
                         value = TextFieldValue(
-                            annotatedString = styled(text, marks, c.text),
+                            annotatedString = annotated,
                             selection = TextRange(
                                 selection.first.coerceAtMost(text.length),
                                 selection.last.coerceAtMost(text.length)
@@ -1289,14 +1292,13 @@ private fun BlockView(
                         }
                     }
                     Spacer(Modifier.width(8.dp))
+                    val annotatedItem = styled(
+                        item.text,
+                        item.marks,
+                        if (item.done) c.text3 else c.text
+                    )
                     BasicTextField(
-                        value = TextFieldValue(
-                            annotatedString = styled(
-                                item.text,
-                                item.marks,
-                                if (item.done) c.text3 else c.text
-                            )
-                        ),
+                        value = TextFieldValue(annotatedString = annotatedItem),
                         onValueChange = { value ->
                             onCheckText(itemIndex, value.text)
                             if (value.text.isEmpty() && itemIndex > 0) onCheckBackspace(itemIndex)
@@ -1330,8 +1332,9 @@ private fun BlockView(
                             fontSize = fontSize.sp,
                             modifier = Modifier.width(22.dp)
                         )
+                        val annotatedListItem = styled(item.text, item.marks, c.text)
                         BasicTextField(
-                            value = TextFieldValue(annotatedString = styled(item.text, item.marks, c.text)),
+                            value = TextFieldValue(annotatedString = annotatedListItem),
                             onValueChange = { value -> onListItemText(itemIndex, value.text) },
                             textStyle = TextStyle(
                                 fontSize = fontSize.sp,
