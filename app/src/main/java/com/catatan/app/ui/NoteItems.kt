@@ -235,8 +235,10 @@ fun NoteRow(
     val title = note.title.ifBlank { "Tanpa judul" }
     val untitled = note.title.isBlank()
     val (totalChecks, doneChecks) = HtmlCodec.countChecklist(note.content)
-    val tags = HtmlCodec.noteTags(note).take(2)
-    val moreTags = HtmlCodec.noteTags(note).size - tags.size
+    val allTags = HtmlCodec.noteTags(note)
+    val tags = allTags.take(2)
+    val moreTags = allTags.size - tags.size
+    val hasImage = HtmlCodec.hasImage(note.content)
     val timeLabel = if (isTrash) relativeTime(note.deletedAt ?: note.updatedAt)
     else noteTimeLabel(note.updatedAt)
     val daysLeft = if (isTrash) trashDaysLeft(note.deletedAt) else -1
@@ -350,7 +352,7 @@ fun NoteRow(
                         )
                         Text("$doneChecks/$totalChecks", color = c.text3, fontSize = 10.5.sp)
                     }
-                    if (HtmlCodec.hasImage(note.content)) {
+                    if (hasImage) {
                         Icon(
                             Icons.Filled.Image,
                             contentDescription = null,
@@ -369,7 +371,7 @@ fun NoteRow(
                 }
             }
 
-            if (HtmlCodec.hasImage(note.content)) {
+            if (hasImage) {
                 Spacer(Modifier.width(9.dp))
                 Box(
                     modifier = Modifier
@@ -461,6 +463,7 @@ fun NoteGridCard(
     val timeLabel = if (isTrash) relativeTime(note.deletedAt ?: note.updatedAt)
     else noteTimeLabel(note.updatedAt)
     val tags = HtmlCodec.noteTags(note).take(2)
+    val hasImage = HtmlCodec.hasImage(note.content)
 
     SwipeableNote(
         enabled = swipeEnabled && !selectionMode,
@@ -542,7 +545,7 @@ fun NoteGridCard(
                 modifier = Modifier.weight(1f)
             )
 
-            if (HtmlCodec.hasImage(note.content)) {
+            if (hasImage) {
                 Spacer(Modifier.height(6.dp))
                 Box(
                     modifier = Modifier

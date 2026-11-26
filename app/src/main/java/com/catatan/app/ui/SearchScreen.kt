@@ -70,6 +70,7 @@ fun SearchScreen(state: AppState) {
     val store by state.repo.store.collectAsState()
 
     var query by remember { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
     var filters by remember { mutableStateOf(UiFilters()) }
     var folderId by remember { mutableStateOf<String?>(null) }
     var showFolderPicker by remember { mutableStateOf(false) }
@@ -78,6 +79,15 @@ fun SearchScreen(state: AppState) {
     LaunchedEffect(Unit) {
         delay(120)
         runCatching { focusRequester.requestFocus() }
+    }
+
+    // Jalankan pencarian berat setelah ketikan berhenti sebentar.
+    LaunchedEffect(query) {
+        if (query.isBlank()) debouncedQuery = ""
+        else {
+            delay(180)
+            debouncedQuery = query
+        }
     }
 
     // simpan pencarian terakhir (debounce 1,5 dtk)
@@ -90,9 +100,9 @@ fun SearchScreen(state: AppState) {
     val folderMap = remember(categories) { categories.associateBy { it.id } }
     val hasInput = query.isNotBlank() || !filters.isEmpty || folderId != null
 
-    val results = remember(store.notes, query, filters, folderId, categories, hasInput) {
+    val results = remember(store.notes, debouncedQuery, filters, folderId, categories, hasInput) {
         if (!hasInput) emptyList()
-        else Query.search(store.notes, query, filters, folderId, categories).take(200)
+        else Query.search(store.notes, debouncedQuery, filters, folderId, categories).take(200)
     }
 
     val recent = store.settings.recentSearches

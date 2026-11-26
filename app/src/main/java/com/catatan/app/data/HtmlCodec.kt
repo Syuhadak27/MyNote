@@ -21,6 +21,21 @@ object HtmlCodec {
         "strong", "em", "b", "i", "u", "a", "mark", "code", "small", "ins", "del"
     )
 
+    /* Regex dikompilasi sekali — penting untuk catatan dengan ribuan blok. */
+    private val COLOR_RE = Regex("color:\\s*(#[0-9a-f]{3,8}|[a-z]+)")
+    private val BG_COLOR_RE = Regex("background-color:\\s*(#[0-9a-f]{3,8}|[a-z]+)")
+    private val WIDTH_RE = Regex("width:\\s*(\\d{1,3})%")
+    private val DATA_IMAGE_RE =
+        Regex("^data:image/(png|jpe?g|gif|webp);base64,", RegexOption.IGNORE_CASE)
+    private val DATA_AUDIO_RE = Regex("^data:audio/[^;]+;base64,", RegexOption.IGNORE_CASE)
+    private val CHECKBOX_RE = Regex("<input[^>]+type=[\"']?checkbox", RegexOption.IGNORE_CASE)
+    private val IMG_RE = Regex("<img[\\s>]", RegexOption.IGNORE_CASE)
+    private val AUDIO_RE = Regex("<audio[\\s>]", RegexOption.IGNORE_CASE)
+    private val LINK_RE = Regex("<a[\\s>]", RegexOption.IGNORE_CASE)
+    private val TABLE_RE = Regex("<table[\\s>]", RegexOption.IGNORE_CASE)
+    private val HASH_RE = Regex("""(?:^|[\s(])#([\p{L}\p{N}_-]{1,40})""")
+    private val WS_RE = Regex("\\s+")
+
     private data class Style(
         val bold: Boolean = false,
         val italic: Boolean = false,
@@ -214,11 +229,11 @@ object HtmlCodec {
         // gaya inline dari atribut style
         val styleAttr = el.attr("style").lowercase()
         if (styleAttr.isNotEmpty()) {
-            Regex("color:\\s*(#[0-9a-f]{3,8}|[a-z]+)").find(styleAttr)?.let {
+            COLOR_RE.find(styleAttr)?.let {
                 val v = it.groupValues[1]
                 if (v != "transparent") s = s.copy(color = normalizeHex(v))
             }
-            Regex("background-color:\\s*(#[0-9a-f]{3,8}|[a-z]+)").find(styleAttr)?.let {
+            BG_COLOR_RE.find(styleAttr)?.let {
                 val v = it.groupValues[1]
                 if (v != "transparent") s = s.copy(highlight = normalizeHex(v))
             }
@@ -254,7 +269,7 @@ object HtmlCodec {
         val src = el.attr("src").trim()
         if (!safeSrc(src, "image")) return null
         val style = el.attr("style")
-        val pct = Regex("width:\\s*(\\d{1,3})%").find(style)?.groupValues?.get(1)?.toIntOrNull()
+        val pct = WIDTH_RE.find(style)?.groupValues?.get(1)?.toIntOrNull()
             ?: 100
         return Block.Image(
             src = src,
@@ -287,10 +302,7 @@ object HtmlCodec {
         if (src.isEmpty()) return false
         if (src.startsWith("http://") || src.startsWith("https://")) return true
         if (src.startsWith(MediaStore.PREFIX)) return true
-        val pattern = if (kind == "image")
-            Regex("^data:image/(png|jpe?g|gif|webp);base64,", RegexOption.IGNORE_CASE)
-        else
-            Regex("^data:audio/[^;]+;base64,", RegexOption.IGNORE_CASE)
+        val pattern = if (kind == "image") DATA_IMAGE_RE else DATA_AUDIO_RE
         return pattern.containsMatchIn(src)
     }
 
@@ -429,21 +441,26 @@ object HtmlCodec {
                 idx++
             }
             val c = text[i]
-            if (c == '\n') sb.append("<br>") else sb.append(escape(c.toString()))
+            if (c == '\n') sb.append("<br>") else appendEscaped(sb, c)
             i++
         }
         for (j in open.indices.reversed()) sb.append(closeTag(open[j]))
         return sb.toString()
     }
 
-    fun escape(s: String): String = buildString(s.length) {
-        for (c in s) when (c) {
-            '&' -> append("&amp;")
-            '<' -> append("&lt;")
-            '>' -> append("&gt;")
-            '"' -> append("&quot;")
-            else -> append(c)
+    /** Tulis karakter yang sudah di-escape langsung ke StringBuilder (tanpa String sementara). */
+    private fun appendEscaped(sb: StringBuilder, c: Char) {
+        when (c) {
+            '&' -> sb.append("&amp;")
+            '<' -> sb.append("&lt;")
+            '>' -> sb.append("&gt;")
+            '"' -> sb.append("&quot;")
+            else -> sb.append(c)
         }
+    }
+
+    fun escape(s: String): String = buildString(s.length) {
+        for (c in s) appendEscaped(this, c)
     }
 
     private fun escapeAttr(s: String): String = escape(s).replace("'", "&#39;")
@@ -483,30 +500,86 @@ object HtmlCodec {
         }
 
         doc.body().childNodes().forEach { walk(it) }
+        return tidyText(sb.toString())
+    }
+
+    /**
+     * Teks polos langsung dari blok editor. Dipakai editor saat menyimpan supaya
+     * tidak perlu serialize -> parse Jsoup -> regex lagi untuk setiap ketikan.
+     */
+    fun blocksToText(blocks: List<Block>): String = buildString {
+        blocks.forEachIndexed { index, block ->
+            if (index > 0) append('\n')
+            when (block) {
+                is Block.Paragraph -> append(block.text)
+                is Block.Heading -> append(block.text)
+                is Block.Quote -> append(block.text)
+                is Block.Code -> append(block.text)
+                is Block.Checklist -> block.items.forEachIndexed { i, item ->
+                    if (i > 0) append('\n')
+                    append(if (item.done) "☑ " else "☐ ")
+                    append(item.text)
+                }
+                is Block.BulletList -> block.items.forEachIndexed { i, item ->
+                    if (i > 0) append('\n')
+                    append("• ")
+                    append(item.text)
+                }
+                is Block.NumberedList -> block.items.forEachIndexed { i, item ->
+                    if (i > 0) append('\n')
+                    append("${i + 1}. ")
+                    append(item.text)
+                }
+                is Block.Divider -> append("\n---\n")
+                is Block.Image -> append(block.alt.ifEmpty { "[Gambar]" })
+                is Block.Audio -> append("[Rekaman audio]")
+                is Block.Table -> block.rows.forEachIndexed { r, row ->
+                    if (r > 0) append('\n')
+                    append(row.joinToString("\t"))
+                }
+            }
+        }
+    }.let { tidyText(it) }
+
+    /** Satu pass: gabungkan spasi/tab, batasi baris kosong, dan trim. */
+    private fun tidyText(raw: String): String {
+        val sb = StringBuilder(raw.length)
+        var spaces = 0
+        var newlines = 0
+        for (c in raw) {
+            when {
+                c == '\n' -> {
+                    newlines++
+                    spaces = 0
+                }
+                c == ' ' || c == '\t' || c == '\r' -> if (newlines == 0) spaces++
+                else -> {
+                    if (sb.isNotEmpty()) {
+                        repeat(minOf(newlines, 2)) { sb.append('\n') }
+                        if (newlines == 0 && spaces > 0) sb.append(' ')
+                    }
+                    newlines = 0
+                    spaces = 0
+                    sb.append(c)
+                }
+            }
+        }
         return sb.toString()
-            .replace(Regex("[ \\t]+"), " ")
-            .replace(Regex("\\n{3,}"), "\n\n")
-            .trim()
     }
 
     /* ----------------------------------------------------------
        Detektor & ekstraktor (sama dengan utils.js)
        ---------------------------------------------------------- */
 
-    fun hasChecklist(html: String): Boolean =
-        Regex("<input[^>]+type=[\"']?checkbox", RegexOption.IGNORE_CASE).containsMatchIn(html)
+    fun hasChecklist(html: String): Boolean = CHECKBOX_RE.containsMatchIn(html)
 
-    fun hasImage(html: String): Boolean =
-        Regex("<img[\\s>]", RegexOption.IGNORE_CASE).containsMatchIn(html)
+    fun hasImage(html: String): Boolean = IMG_RE.containsMatchIn(html)
 
-    fun hasAudio(html: String): Boolean =
-        Regex("<audio[\\s>]", RegexOption.IGNORE_CASE).containsMatchIn(html)
+    fun hasAudio(html: String): Boolean = AUDIO_RE.containsMatchIn(html)
 
-    fun hasLink(html: String): Boolean =
-        Regex("<a[\\s>]", RegexOption.IGNORE_CASE).containsMatchIn(html)
+    fun hasLink(html: String): Boolean = LINK_RE.containsMatchIn(html)
 
-    fun hasTable(html: String): Boolean =
-        Regex("<table[\\s>]", RegexOption.IGNORE_CASE).containsMatchIn(html)
+    fun hasTable(html: String): Boolean = TABLE_RE.containsMatchIn(html)
 
     fun firstImageSrc(html: String): String =
         runCatching {
@@ -522,8 +595,7 @@ object HtmlCodec {
 
     fun extractHashtags(text: String): List<String> {
         if (text.isBlank()) return emptyList()
-        val regex = Regex("""(?:^|[\s(])#([\p{L}\p{N}_-]{1,40})""")
-        return regex.findAll(text)
+        return HASH_RE.findAll(text)
             .map { it.groupValues[1].lowercase() }
             .distinct()
             .toList()
@@ -539,13 +611,25 @@ object HtmlCodec {
 
     fun notePreview(note: Note, max: Int = 180): String {
         val plain = note.plainText.ifEmpty { htmlToText(note.content) }
-        val collapsed = plain.replace(Regex("\\s+"), " ").trim()
+        val collapsed = plain.replace(WS_RE, " ").trim()
         if (collapsed.isEmpty()) return if (hasImage(note.content)) "Gambar" else ""
         return collapsed.take(max)
     }
 
-    fun countWords(text: String): Int =
-        text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size
+    /** Hitung kata tanpa membuat daftar semua kata. */
+    fun countWords(text: String): Int {
+        var count = 0
+        var inWord = false
+        for (c in text) {
+            if (c.isWhitespace()) {
+                inWord = false
+            } else if (!inWord) {
+                count++
+                inWord = true
+            }
+        }
+        return count
+    }
 
     /* ----------------------------------------------------------
        Aliran penulisan saat parsing

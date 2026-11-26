@@ -14,6 +14,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -33,7 +36,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -85,6 +87,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -141,6 +144,41 @@ private val HIGHLIGHT_COLORS = listOf(
     null, "#fef08a", "#bbf7d0", "#bfdbfe", "#fbcfe8", "#fed7aa", "#ddd6fe"
 )
 
+/** Patch kecil untuk undo/redo: menyimpan bagian daftar yang berubah saja. */
+private data class BlockPatch(
+    val start: Int,
+    val removed: List<Block>,
+    val added: List<Block>
+) {
+    val isEmpty: Boolean get() = removed.isEmpty() && added.isEmpty()
+
+    fun forward(list: List<Block>): List<Block> =
+        list.take(start) + added + list.drop(start + removed.size)
+
+    fun backward(list: List<Block>): List<Block> =
+        list.take(start) + removed + list.drop(start + added.size)
+}
+
+private data class NoteStats(val plain: String, val words: Int, val minutes: Int)
+
+private fun diffPatch(old: List<Block>, new: List<Block>): BlockPatch {
+    var start = 0
+    while (start < old.size && start < new.size &&
+        old[start] == new[start]
+    ) start++
+    var oldEnd = old.size
+    var newEnd = new.size
+    while (oldEnd > start && newEnd > start && old[oldEnd - 1] == new[newEnd - 1]) {
+        oldEnd--
+        newEnd--
+    }
+    return BlockPatch(
+        start,
+        old.subList(start, oldEnd).toList(),
+        new.subList(start, newEnd).toList()
+    )
+}
+
 /* ============================================================
    Editor catatan
    ============================================================ */
@@ -166,8 +204,14 @@ fun EditorScreen(state: AppState) {
     var focusMode by remember { mutableStateOf(false) }
     var tagInput by remember { mutableStateOf("") }
 
-    var undoStack by remember { mutableStateOf(emptyList<List<Block>>()) }
-    var redoStack by remember { mutableStateOf(emptyList<List<Block>>()) }
+    var stats by remember(noteId) {
+        val plain = HtmlCodec.blocksToText(blocks)
+        val words = HtmlCodec.countWords(plain)
+        mutableStateOf(NoteStats(plain, words, max(1, words / 200)))
+    }
+
+    var undoStack by remember(noteId) { mutableStateOf(emptyList<BlockPatch>()) }
+    var redoStack by remember(noteId) { mutableStateOf(emptyList<BlockPatch>()) }
 
     var styleDialog by remember { mutableStateOf(false) }
     var colorDialog by remember { mutableStateOf(false) }
@@ -213,9 +257,9 @@ fun EditorScreen(state: AppState) {
         return if (found >= 0) found else focusIndex
     }
 
-    val findMatches = remember(findQuery, blocks) {
+    val findMatches = remember(findOpen, findQuery, blocks) {
         val needle = findQuery.trim()
-        if (needle.length < 2) emptyList()
+        if (!findOpen || needle.length < 2) emptyList()
         else buildList {
             blocks.forEachIndexed { i, b ->
                 val text = textOf(b) ?: ""
@@ -239,7 +283,9 @@ fun EditorScreen(state: AppState) {
         val current = state.repo.note(id) ?: return
         val now = System.currentTimeMillis()
         val content = HtmlCodec.serialize(blocks)
-        val plain = HtmlCodec.htmlToText(content)
+        val plain = HtmlCodec.blocksToText(blocks)
+        val words = HtmlCodec.countWords(plain)
+        stats = NoteStats(plain, words, max(1, words / 200))
         var revAt = current.revAt
         if ((current.title.isNotBlank() || current.content.isNotBlank()) &&
             now - revAt >= REVISION_INTERVAL_MS
@@ -252,7 +298,7 @@ fun EditorScreen(state: AppState) {
                 title = title.take(240),
                 content = content,
                 plainText = plain,
-                wordCount = HtmlCodec.countWords(plain),
+                wordCount = words,
                 tags = tags,
                 updatedAt = now,
                 revAt = revAt
@@ -276,7 +322,9 @@ fun EditorScreen(state: AppState) {
 
     fun commitBlocks(next: List<Block>) {
         if (locked) return
-        undoStack = (undoStack + listOf(blocks)).takeLast(40)
+        val patch = diffPatch(blocks, next)
+        if (patch.isEmpty) return
+        undoStack = (undoStack + patch).takeLast(40)
         redoStack = emptyList()
         blocks = next
         saveStatus = "saving"
@@ -284,16 +332,18 @@ fun EditorScreen(state: AppState) {
 
     fun undo() {
         if (undoStack.isEmpty()) return
-        redoStack = redoStack + listOf(blocks)
-        blocks = undoStack.last()
+        val patch = undoStack.last()
+        redoStack = redoStack + patch
+        blocks = patch.backward(blocks)
         undoStack = undoStack.dropLast(1)
         saveStatus = "saving"
     }
 
     fun redo() {
         if (redoStack.isEmpty()) return
-        undoStack = undoStack + listOf(blocks)
-        blocks = redoStack.last()
+        val patch = redoStack.last()
+        undoStack = undoStack + patch
+        blocks = patch.forward(blocks)
         redoStack = redoStack.dropLast(1)
         saveStatus = "saving"
     }
@@ -407,6 +457,9 @@ fun EditorScreen(state: AppState) {
         tagInput = ""
     }
 
+    // onDispose tidak ikut recompose saat blok berubah; simpan persist terbaru.
+    val latestPersist = rememberUpdatedState({ persist() })
+
     LaunchedEffect(title, blocks, tags, noteId) {
         if (noteId == null) return@LaunchedEffect
         saveStatus = "saving"
@@ -415,7 +468,7 @@ fun EditorScreen(state: AppState) {
     }
 
     DisposableEffect(noteId) {
-        onDispose { if (noteId != null) persist() }
+        onDispose { if (noteId != null) latestPersist.value() }
     }
 
     BackHandler { leave() }
@@ -620,7 +673,6 @@ fun EditorScreen(state: AppState) {
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 14.dp, vertical = 4.dp)
         ) {
             // Baris meta
@@ -741,6 +793,7 @@ fun EditorScreen(state: AppState) {
             /* ---------------- Kertas ---------------- */
             Box(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
                     .background(c.surface)
@@ -752,7 +805,8 @@ fun EditorScreen(state: AppState) {
                     .border(1.dp, c.border, RoundedCornerShape(20.dp))
                     .padding(16.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    item(key = "title") {
                     BasicTextField(
                         value = title,
                         onValueChange = { value ->
@@ -780,8 +834,10 @@ fun EditorScreen(state: AppState) {
                         inner()
                     }
                     Spacer(Modifier.height(10.dp))
+                    }
 
-                    blocks.forEachIndexed { index, block ->
+                    items(blocks.size, key = { i -> blocks.getOrNull(i)?.id ?: "b$i" }) { index ->
+                        val block = blocks.getOrNull(index) ?: return@items
                         val matchHere = findMatches.getOrNull(findIndex)
                         val markHere = if (findOpen && matchHere != null &&
                             matchHere.first == index && findQuery.trim().isNotEmpty()
@@ -941,6 +997,7 @@ fun EditorScreen(state: AppState) {
                         )
                     }
 
+                    item(key = "add") {
                     // Area kosong untuk menambah paragraf
                     Box(
                         modifier = Modifier
@@ -959,22 +1016,20 @@ fun EditorScreen(state: AppState) {
                     if (focusMode) {
                         Spacer(Modifier.height(60.dp))
                     }
+                    }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            // Footer
-            val plain = HtmlCodec.htmlToText(HtmlCodec.serialize(blocks))
-            val words = HtmlCodec.countWords(plain)
-            val minutes = max(1, words / 200)
+            // Footer — statistik dihitung sekali saat persist, bukan saat recompose.
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "$words kata · ${plain.length} karakter · $minutes mnt baca",
+                    "${stats.words} kata · ${stats.plain.length} karakter · ${stats.minutes} mnt baca",
                     color = c.text3,
                     fontSize = 10.5.sp,
                     modifier = Modifier.weight(1f)
@@ -1516,7 +1571,8 @@ private fun BlockView(
                 is Block.Heading -> block.align
                 else -> 0
             }
-            val annotated = styled(text, marks + listOfNotNull(findMark), c.text)
+            val effectiveMarks = if (findMark == null) marks else marks + findMark
+            val annotated = styled(text, effectiveMarks, c.text)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1534,10 +1590,10 @@ private fun BlockView(
                     BasicTextField(
                         value = TextFieldValue(
                             annotatedString = annotated,
-                            selection = TextRange(
+                            selection = if (isFocused) TextRange(
                                 selection.first.coerceAtMost(text.length),
                                 selection.last.coerceAtMost(text.length)
-                            )
+                            ) else TextRange(0)
                         ),
                         onValueChange = { value ->
                             onTextChange(value.text)
@@ -1763,28 +1819,34 @@ private fun FieldBox(label: String, value: String, onChange: (String) -> Unit, k
 }
 
 @Composable
-private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedString = buildAnnotatedString {
-    addStyle(SpanStyle(color = base), 0, text.length)
-    append(text)
-    marks.forEach { m ->
-        val s = m.start.coerceIn(0, text.length)
-        val e = m.end.coerceIn(s, text.length)
-        if (s < e) {
-            when (m.type) {
-                MarkType.BOLD -> addStyle(SpanStyle(fontWeight = FontWeight.W700), s, e)
-                MarkType.ITALIC -> addStyle(SpanStyle(fontStyle = FontStyle.Italic), s, e)
-                MarkType.UNDERLINE -> addStyle(SpanStyle(textDecoration = TextDecoration.Underline), s, e)
-                MarkType.STRIKE -> addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), s, e)
-                MarkType.COLOR -> m.value?.let { addStyle(SpanStyle(color = parseHex(it)), s, e) }
-                MarkType.HIGHLIGHT -> m.value?.let { addStyle(SpanStyle(background = parseHex(it)), s, e) }
-                MarkType.LINK -> addStyle(
-                    SpanStyle(color = CatatanTheme.colors.accentStrong, textDecoration = TextDecoration.Underline),
-                    s, e
-                )
+private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedString =
+    remember(text, marks, base) {
+        buildAnnotatedString {
+            addStyle(SpanStyle(color = base), 0, text.length)
+            append(text)
+            marks.forEach { m ->
+                val s = m.start.coerceIn(0, text.length)
+                val e = m.end.coerceIn(s, text.length)
+                if (s < e) {
+                    when (m.type) {
+                        MarkType.BOLD -> addStyle(SpanStyle(fontWeight = FontWeight.W700), s, e)
+                        MarkType.ITALIC -> addStyle(SpanStyle(fontStyle = FontStyle.Italic), s, e)
+                        MarkType.UNDERLINE -> addStyle(SpanStyle(textDecoration = TextDecoration.Underline), s, e)
+                        MarkType.STRIKE -> addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), s, e)
+                        MarkType.COLOR -> m.value?.let { addStyle(SpanStyle(color = parseHex(it)), s, e) }
+                        MarkType.HIGHLIGHT -> m.value?.let { addStyle(SpanStyle(background = parseHex(it)), s, e) }
+                        MarkType.LINK -> addStyle(
+                            SpanStyle(
+                                color = CatatanTheme.colors.accentStrong,
+                                textDecoration = TextDecoration.Underline
+                            ),
+                            s, e
+                        )
+                    }
+                }
             }
         }
     }
-}
 
 @Composable
 private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {

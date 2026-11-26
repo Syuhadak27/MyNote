@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,9 +15,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
@@ -95,13 +95,13 @@ fun PreviewScreen(state: AppState) {
             val blocks = remember(note.content) { HtmlCodec.parse(note.content) }
             val checks = remember(note.content) { HtmlCodec.countChecklist(note.content) }
 
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 8.dp)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp)
             ) {
+                item(key = "header") {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (folder != null) {
                         Row(
@@ -154,18 +154,21 @@ fun PreviewScreen(state: AppState) {
                 }
                 Spacer(Modifier.height(14.dp))
                 AppDivider()
-
-                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                    blocks.forEach { block -> StaticBlock(block) }
                 }
 
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Terakhir diubah ${relativeTime(note.updatedAt)}",
-                    color = c.text3,
-                    fontSize = 10.5.sp
-                )
-                Spacer(Modifier.height(26.dp))
+                items(blocks.size, key = { blocks[it].id }) { index ->
+                    Spacer(Modifier.height(if (index == 0) 12.dp else 0.dp))
+                    StaticBlock(blocks[index])
+                }
+                item(key = "footer") {
+                    Spacer(Modifier.height(22.dp))
+                    Text(
+                        "Terakhir diubah ${relativeTime(note.updatedAt)}",
+                        color = c.text3,
+                        fontSize = 10.5.sp
+                    )
+                    Spacer(Modifier.height(26.dp))
+                }
             }
 
             Row(

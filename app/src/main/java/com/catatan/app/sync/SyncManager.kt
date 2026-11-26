@@ -59,6 +59,12 @@ class SyncManager(
     private val database by lazy { FirebaseDatabase.getInstance(BuildConfig.FIREBASE_DATABASE_URL) }
     private val mutex = Mutex()
 
+    /* Cache decode per item: raw JSON -> objek. Revisi bisa sangat besar, jadi
+       tidak perlu di-decode ulang setiap auto-sync bila isinya tidak berubah. */
+    private val noteCache = HashMap<String, Pair<String, Note>>()
+    private val categoryCache = HashMap<String, Pair<String, Category>>()
+    private val revisionCache = HashMap<String, Pair<String, Revision>>()
+
     /** Tarik data cloud, gabungkan dengan lokal, lalu dorong yang lebih baru. */
     suspend fun syncNow(): Result<Unit> {
         val uid = authManager.currentUid
@@ -100,9 +106,11 @@ class SyncManager(
     private suspend fun syncData(uid: String) {
         val snapshot = database.reference.child("users").child(uid).get().await()
 
-        val remoteNotes = decodeChildren(snapshot.child("notes"), Note.serializer())
-        val remoteCategories = decodeChildren(snapshot.child("categories"), Category.serializer())
-        val remoteRevisions = decodeChildren(snapshot.child("revisions"), Revision.serializer())
+        val remoteNotes = decodeChildren(snapshot.child("notes"), Note.serializer(), noteCache)
+        val remoteCategories =
+            decodeChildren(snapshot.child("categories"), Category.serializer(), categoryCache)
+        val remoteRevisions =
+            decodeChildren(snapshot.child("revisions"), Revision.serializer(), revisionCache)
         val remoteSettings = snapshot.child("settings").getValue(String::class.java)
             ?.let { raw -> runCatching { repo.json.decodeFromString(AppSettings.serializer(), raw) }.getOrNull() }
 
@@ -160,13 +168,22 @@ class SyncManager(
         }
     }
 
-    private fun <T> decodeChildren(parent: DataSnapshot, serializer: KSerializer<T>): Map<String, T> {
+    private fun <T : Any> decodeChildren(
+        parent: DataSnapshot,
+        serializer: KSerializer<T>,
+        cache: MutableMap<String, Pair<String, T>>
+    ): Map<String, T> {
         val out = linkedMapOf<String, T>()
         parent.children.forEach { snap ->
             val key = snap.key ?: return@forEach
             val raw = snap.getValue(String::class.java) ?: return@forEach
-            runCatching { repo.json.decodeFromString(serializer, raw) }
-                .getOrNull()?.let { out[key] = it }
+            val cached = cache[key]
+            val item = if (cached?.first == raw) cached.second
+            else runCatching { repo.json.decodeFromString(serializer, raw) }.getOrNull()
+            if (item != null) {
+                if (cached?.first != raw) cache[key] = raw to item
+                out[key] = item
+            }
         }
         return out
     }

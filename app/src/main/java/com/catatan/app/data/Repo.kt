@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.StatFs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,19 +15,29 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
 /* ============================================================
    Repo — penyimpanan tunggal (JSON) + seluruh operasi data
    Pengganti IndexedDB pada versi web.
+
+   Catatan aktif dan revisi sengaja disimpan di dua file agar
+   menyimpan satu catatan tidak perlu menulis ulang semua revisi.
    ============================================================ */
+
+private const val WRITE_DEBOUNCE_MS = 900L
 
 class Repo(context: Context, initialScope: String = "local") {
 
     private val appContext = context.applicationContext
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeMutex = Mutex()
+
+    @Volatile
+    private var pendingWrite = false
+    private var writeJob: Job? = null
 
     /* ----------------------------------------------------------
        Scope penyimpanan: "local" atau uid akun Firebase.
@@ -35,6 +47,7 @@ class Repo(context: Context, initialScope: String = "local") {
 
     private var scopeKey: String = normalizeScope(initialScope)
     private var file: File = fileForScope(scopeKey)
+    private var revisionsFile: File = revisionsFileForScope(scopeKey)
 
     val scope: String get() = scopeKey
     val isAccountScope: Boolean get() = scopeKey != "local"
@@ -50,6 +63,11 @@ class Repo(context: Context, initialScope: String = "local") {
         if (key == "local") "catatan-store.json" else "catatan-store-$key.json"
     )
 
+    private fun revisionsFileForScope(key: String): File = File(
+        appContext.filesDir,
+        if (key == "local") "catatan-revisions.json" else "catatan-revisions-$key.json"
+    )
+
     /** Ganti scope akun. Data scope lama tetap utuh di file masing-masing. */
     fun switchScope(next: String) {
         val normalized = normalizeScope(next)
@@ -57,12 +75,13 @@ class Repo(context: Context, initialScope: String = "local") {
         flushNow()
         scopeKey = normalized
         file = fileForScope(scopeKey)
+        revisionsFile = revisionsFileForScope(scopeKey)
         load()
     }
 
     /** Tulis file segera (dipakai sebelum pindah scope / logout). */
     fun flushNow() {
-        runBlocking { writeMutex.withLock { writeToDisk() } }
+        runBlocking { flushPendingWrite() }
     }
 
     val json: Json = Json {
@@ -81,36 +100,84 @@ class Repo(context: Context, initialScope: String = "local") {
        Muat & simpan
        ---------------------------------------------------------- */
 
+    /** Migrasi sekali dari format lama yang menyimpan revisi di file utama. */
+    private fun migrateLegacy() {
+        if (!file.exists() || revisionsFile.exists()) return
+        val legacy = runCatching { json.decodeFromString(Store.serializer(), file.readText()) }
+            .getOrNull() ?: return
+        if (legacy.revisions.isEmpty()) return
+        runCatching {
+            atomicWrite(
+                revisionsFile,
+                json.encodeToString(ListSerializer(Revision.serializer()), legacy.revisions)
+            )
+            atomicWrite(
+                file,
+                json.encodeToString(Store.serializer(), legacy.copy(revisions = emptyList()))
+            )
+        }
+    }
+
     fun load() {
-        val loaded = if (file.exists()) {
-            runCatching { json.decodeFromString(Store.serializer(), file.readText()) }
-                .getOrNull()
+        migrateLegacy()
+        val main = if (file.exists()) {
+            runCatching { json.decodeFromString(Store.serializer(), file.readText()) }.getOrNull()
         } else null
-        _store.value = loaded ?: Store()
+        val revisions = if (revisionsFile.exists()) {
+            runCatching {
+                json.decodeFromString(ListSerializer(Revision.serializer()), revisionsFile.readText())
+            }.getOrNull() ?: emptyList()
+        } else emptyList()
+        _store.value = (main ?: Store()).copy(revisions = revisions)
     }
 
     private fun scheduleSave() {
-        ioScope.launch {
-            writeMutex.withLock { writeToDisk() }
+        pendingWrite = true
+        if (writeJob?.isActive == true) return
+        writeJob = ioScope.launch {
+            delay(WRITE_DEBOUNCE_MS)
+            writeMutex.withLock {
+                if (pendingWrite) {
+                    writeToDisk()
+                    pendingWrite = false
+                }
+            }
+        }
+    }
+
+    private fun atomicWrite(target: File, text: String) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeText(text)
+        if (!tmp.renameTo(target)) {
+            target.writeText(text)
+            tmp.delete()
         }
     }
 
     private fun writeToDisk() {
         runCatching {
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(json.encodeToString(Store.serializer(), _store.value))
-            if (!tmp.renameTo(file)) {
-                file.writeText(json.encodeToString(Store.serializer(), _store.value))
-                tmp.delete()
-            }
+            val s = _store.value
+            atomicWrite(
+                file,
+                json.encodeToString(Store.serializer(), s.copy(revisions = emptyList()))
+            )
+            atomicWrite(
+                revisionsFile,
+                json.encodeToString(ListSerializer(Revision.serializer()), s.revisions)
+            )
+        }
+    }
+
+    private suspend fun flushPendingWrite() {
+        writeMutex.withLock {
+            writeToDisk()
+            pendingWrite = false
         }
     }
 
     /** Simpan sinkron (dipakai saat flush penting, mis. keluar editor). */
     fun saveNow() {
-        ioScope.launch {
-            writeMutex.withLock { writeToDisk() }
-        }
+        ioScope.launch { flushPendingWrite() }
     }
 
     private fun mutate(transform: (Store) -> Store) {
@@ -138,39 +205,54 @@ class Repo(context: Context, initialScope: String = "local") {
     }
 
     fun upsertNotes(notes: List<Note>) = mutate { s ->
-        val map = notes.associateBy { it.id }
-        val kept = s.notes.map { map[it.id] ?: it }
-        val fresh = notes.filter { n -> s.notes.none { it.id == n.id } }
-        s.copy(notes = fresh + kept)
+        if (notes.isEmpty()) s else {
+            val map = notes.associateBy { it.id }
+            val existingIds = s.notes.mapTo(HashSet(s.notes.size)) { it.id }
+            val kept = s.notes.map { map[it.id] ?: it }
+            val fresh = notes.filter { it.id !in existingIds }
+            s.copy(notes = fresh + kept)
+        }
     }
 
     fun deleteNotesPermanently(ids: List<String>) = mutate { s ->
-        s.copy(
-            notes = s.notes.filterNot { it.id in ids },
-            revisions = s.revisions.filterNot { it.noteId in ids }
-        )
+        if (ids.isEmpty()) s else {
+            val idSet = ids.toSet()
+            s.copy(
+                notes = s.notes.filterNot { it.id in idSet },
+                revisions = s.revisions.filterNot { it.noteId in idSet }
+            )
+        }
     }
 
     /** Pindahkan ke sampah. */
     fun trashNotes(ids: List<String>, now: Long) = mutate { s ->
-        s.copy(notes = s.notes.map { n ->
-            if (n.id in ids && !n.isDeleted)
-                n.copy(isDeleted = true, deletedAt = now, isArchived = false)
-            else n
-        })
+        if (ids.isEmpty()) s else {
+            val idSet = ids.toSet()
+            s.copy(notes = s.notes.map { n ->
+                if (n.id in idSet && !n.isDeleted)
+                    n.copy(isDeleted = true, deletedAt = now, isArchived = false)
+                else n
+            })
+        }
     }
 
     /** Pulihkan dari sampah. */
     fun restoreNotes(ids: List<String>, now: Long) = mutate { s ->
-        s.copy(notes = s.notes.map { n ->
-            if (n.id in ids && n.isDeleted)
-                n.copy(isDeleted = false, deletedAt = null, updatedAt = now)
-            else n
-        })
+        if (ids.isEmpty()) s else {
+            val idSet = ids.toSet()
+            s.copy(notes = s.notes.map { n ->
+                if (n.id in idSet && n.isDeleted)
+                    n.copy(isDeleted = false, deletedAt = null, updatedAt = now)
+                else n
+            })
+        }
     }
 
     fun setNoteFlags(ids: List<String>, now: Long, block: (Note) -> Note) = mutate { s ->
-        s.copy(notes = s.notes.map { n -> if (n.id in ids) block(n) else n })
+        if (ids.isEmpty()) s else {
+            val idSet = ids.toSet()
+            s.copy(notes = s.notes.map { n -> if (n.id in idSet) block(n) else n })
+        }
     }
 
     fun createNote(
@@ -331,13 +413,15 @@ class Repo(context: Context, initialScope: String = "local") {
         val noteMap = incoming.notes.associateBy { it.id }
         val catMap = incoming.categories.associateBy { it.id }
         val revMap = incoming.revisions.associateBy { it.id }
+        val noteIds = s.notes.mapTo(HashSet(s.notes.size)) { it.id }
+        val catIds = s.categories.mapTo(HashSet(s.categories.size)) { it.id }
+        val revIds = s.revisions.mapTo(HashSet(s.revisions.size)) { it.id }
         s.copy(
-            notes = (incoming.notes.filter { n -> s.notes.none { it.id == n.id } } +
-                s.notes.map { noteMap[it.id] ?: it }),
-            categories = (incoming.categories.filter { c -> s.categories.none { it.id == c.id } } +
-                s.categories.map { catMap[it.id] ?: it }),
-            revisions = (incoming.revisions.filter { r -> s.revisions.none { it.id == r.id } } +
-                s.revisions.map { revMap[it.id] ?: it }),
+            notes = incoming.notes.filter { it.id !in noteIds } + s.notes.map { noteMap[it.id] ?: it },
+            categories = incoming.categories.filter { it.id !in catIds } +
+                s.categories.map { catMap[it.id] ?: it },
+            revisions = incoming.revisions.filter { it.id !in revIds } +
+                s.revisions.map { revMap[it.id] ?: it },
             settings = incoming.settings
         )
     }
@@ -358,5 +442,8 @@ class Repo(context: Context, initialScope: String = "local") {
         used to (total - free + used).coerceAtLeast(total)
     }.getOrDefault(0L to 0L)
 
-    fun storeFileSize(): Long = runCatching { file.length() }.getOrDefault(0L)
+    fun storeFileSize(): Long = runCatching {
+        (if (file.exists()) file.length() else 0L) +
+            (if (revisionsFile.exists()) revisionsFile.length() else 0L)
+    }.getOrDefault(0L)
 }
