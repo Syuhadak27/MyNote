@@ -119,5 +119,6 @@ dependencies {
     // Google Sign-In lewat Credential Manager
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
-    implementation("com.google.android.gms:play-services-auth:21.2.0")
+    // GetGoogleIdOption / GoogleIdTokenCredential ada di artifact googleid.
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 }
