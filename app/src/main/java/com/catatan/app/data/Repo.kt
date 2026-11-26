@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.StatFs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,12 +21,49 @@ import java.io.File
    Pengganti IndexedDB pada versi web.
    ============================================================ */
 
-class Repo(context: Context) {
+class Repo(context: Context, initialScope: String = "local") {
 
     private val appContext = context.applicationContext
-    private val file = File(appContext.filesDir, "catatan-store.json")
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val writeMutex = Mutex()
+
+    /* ----------------------------------------------------------
+       Scope penyimpanan: "local" atau uid akun Firebase.
+       Setiap akun punya file & folder media sendiri, sehingga akun
+       berbeda tidak pernah membaca data akun lain di perangkat yang sama.
+       ---------------------------------------------------------- */
+
+    private var scopeKey: String = normalizeScope(initialScope)
+    private var file: File = fileForScope(scopeKey)
+
+    val scope: String get() = scopeKey
+    val isAccountScope: Boolean get() = scopeKey != "local"
+    val mediaDirName: String get() = if (isAccountScope) "media-$scopeKey" else "media"
+
+    private fun normalizeScope(value: String): String {
+        val clean = value.trim().filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        return if (clean.isEmpty() || clean == "local") "local" else clean.take(80)
+    }
+
+    private fun fileForScope(key: String): File = File(
+        appContext.filesDir,
+        if (key == "local") "catatan-store.json" else "catatan-store-$key.json"
+    )
+
+    /** Ganti scope akun. Data scope lama tetap utuh di file masing-masing. */
+    fun switchScope(next: String) {
+        val normalized = normalizeScope(next)
+        if (normalized == scopeKey) return
+        flushNow()
+        scopeKey = normalized
+        file = fileForScope(scopeKey)
+        load()
+    }
+
+    /** Tulis file segera (dipakai sebelum pindah scope / logout). */
+    fun flushNow() {
+        runBlocking { writeMutex.withLock { writeToDisk() } }
+    }
 
     val json: Json = Json {
         ignoreUnknownKeys = true
@@ -52,7 +90,7 @@ class Repo(context: Context) {
     }
 
     private fun scheduleSave() {
-        scope.launch {
+        ioScope.launch {
             writeMutex.withLock { writeToDisk() }
         }
     }
@@ -70,7 +108,7 @@ class Repo(context: Context) {
 
     /** Simpan sinkron (dipakai saat flush penting, mis. keluar editor). */
     fun saveNow() {
-        scope.launch {
+        ioScope.launch {
             writeMutex.withLock { writeToDisk() }
         }
     }
@@ -220,14 +258,15 @@ class Repo(context: Context) {
        ---------------------------------------------------------- */
 
     fun updateSettings(block: (AppSettings) -> AppSettings) = mutate { s ->
-        s.copy(settings = block(s.settings))
+        s.copy(settings = block(s.settings).copy(settingsUpdatedAt = System.currentTimeMillis()))
     }
 
     fun resetSettings(preserveBackup: Boolean = true) = mutate { s ->
         val def = AppSettings()
         s.copy(settings = def.copy(
             lastBackupAt = if (preserveBackup) s.settings.lastBackupAt else 0,
-            recentSearches = s.settings.recentSearches
+            recentSearches = s.settings.recentSearches,
+            settingsUpdatedAt = System.currentTimeMillis()
         ))
     }
 
@@ -237,12 +276,18 @@ class Repo(context: Context) {
             val list = (listOf(t) + s.settings.recentSearches.filterNot { it.equals(t, true) })
                 .distinct()
                 .take(8)
-            s.copy(settings = s.settings.copy(recentSearches = list))
+            s.copy(settings = s.settings.copy(
+                recentSearches = list,
+                settingsUpdatedAt = System.currentTimeMillis()
+            ))
         }
     }
 
     fun clearRecentSearches() = mutate { s ->
-        s.copy(settings = s.settings.copy(recentSearches = emptyList()))
+        s.copy(settings = s.settings.copy(
+            recentSearches = emptyList(),
+            settingsUpdatedAt = System.currentTimeMillis()
+        ))
     }
 
     /* ----------------------------------------------------------

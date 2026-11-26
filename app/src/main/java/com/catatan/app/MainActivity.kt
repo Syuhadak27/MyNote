@@ -1,5 +1,6 @@
 package com.catatan.app
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -8,10 +9,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.catatan.app.data.Repo
 import com.catatan.app.ui.AppViewModel
@@ -35,17 +40,33 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
             CatatanTheme(accentHex = settings.accent, darkTheme = dark) {
-                AppRoot(repo = repo, onRootExit = { finish() })
+                AppRoot(repo = repo, activity = this, onRootExit = { finish() })
             }
         }
     }
 }
 
 @Composable
-private fun AppRoot(repo: Repo, onRootExit: () -> Unit) {
+private fun AppRoot(repo: Repo, activity: Context, onRootExit: () -> Unit) {
     val context = LocalContext.current
     val viewModel: AppViewModel = viewModel(factory = AppViewModel.Factory(repo, context))
     val state = viewModel.state
+
+    // Activity dibutuhkan Credential Manager untuk pemilih akun Google.
+    DisposableEffect(activity) {
+        state.activity = activity
+        onDispose { state.activity = null }
+    }
+
+    // Sinkronisasi otomatis tiap kali aplikasi kembali ke foreground.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) state.onAppResume()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Izin pemasangan aplikasi (update dari GitHub Releases)
     val permissionLauncher = rememberLauncherForActivityResult(

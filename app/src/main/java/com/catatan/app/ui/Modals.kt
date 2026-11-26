@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -430,6 +431,7 @@ fun ModalHost(state: AppState) {
         Modal.About -> AboutModal(state)
         is Modal.ImportMode -> ImportModeModal(state, modal)
         Modal.UpdateInfoDialog -> UpdateInfoModal(state)
+        is Modal.LoginMerge -> LoginMergeModal(state, modal)
         else -> Unit
     }
 }
@@ -467,6 +469,54 @@ private fun ConfirmModal(state: AppState, modal: Modal.Confirm) {
                 lineHeight = 20.sp
             )
         }
+    }
+}
+
+/* ============================================================
+   1b. Konfirmasi gabung data lokal setelah login Google
+   ============================================================ */
+
+@Composable
+private fun LoginMergeModal(state: AppState, modal: Modal.LoginMerge) {
+    val c = CatatanTheme.colors
+    AppModal(
+        icon = Icons.Filled.Person,
+        title = "Gabungkan catatan lokal?",
+        subtitle = "Akun Google sudah terhubung",
+        onClose = {
+            modal.onSkip()
+            state.closeModal()
+        },
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.End)
+            ) {
+                AppButton("Mulai dari cloud", {
+                    modal.onSkip()
+                    state.closeModal()
+                }, BtnType.GHOST)
+                AppButton("Gabungkan", {
+                    modal.onMerge()
+                    state.closeModal()
+                }, BtnType.PRIMARY)
+            }
+        }
+    ) {
+        Text(
+            if (modal.localCount > 0) {
+                "Perangkat ini punya ${modal.localCount} catatan yang belum terhubung ke akun. " +
+                    "Pilih “Gabungkan” untuk mengunggahnya ke akun ini, atau “Mulai dari cloud” " +
+                    "untuk memakai data akun saja. Catatan lokal tetap tersimpan di perangkat " +
+                    "dan bisa dipakai lagi setelah keluar akun."
+            } else {
+                "Data lokal perangkat ini akan digabungkan ke akun Google-mu. Pilih “Mulai dari " +
+                    "cloud” jika ingin memakai data akun saja."
+            },
+            color = c.text2,
+            fontSize = 13.5.sp,
+            lineHeight = 20.sp
+        )
     }
 }
 

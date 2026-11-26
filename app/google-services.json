@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "869732787640",
+    "project_id": "mynotes-30b82",
+    "storage_bucket": "mynotes-30b82.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:869732787640:android:d9dc15935b770fff715b4d",
+        "android_client_info": {
+          "package_name": "com.catatan.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "869732787640-io42d0dpq2hjuuu8vtch5l1bcdd991oq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.catatan.app",
+            "certificate_hash": "293065a074a5ac21dec99aab9a9ea7ecb29b2723"
+          }
+        },
+        {
+          "client_id": "869732787640-7344plhfpbitl0qkpk4ociaf9vo682um.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyByqm3h5oGDxc1Rt_IDxLygqL2rWROmt_k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "869732787640-7344plhfpbitl0qkpk4ociaf9vo682um.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

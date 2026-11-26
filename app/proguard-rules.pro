@@ -31,3 +31,9 @@
 -dontwarn androidx.compose.**
 
 # Native (MediaRecorder/MediaPlayer) tidak perlu aturan tambahan
+
+# Firebase / Google Play Services / Credential Manager
+-dontwarn com.google.firebase.**
+-dontwarn com.google.android.gms.**
+-dontwarn androidx.credentials.**
+-dontwarn com.google.android.libraries.identity.googleid.**

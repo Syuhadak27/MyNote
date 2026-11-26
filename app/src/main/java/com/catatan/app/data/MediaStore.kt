@@ -5,23 +5,76 @@ import android.util.Base64
 import java.io.File
 
 /**
- * Penyimpanan media (gambar/rekaman) sebagai file di filesDir/media.
+ * Penyimpanan media (gambar/rekaman) sebagai file di filesDir/<scope>/media.
  * HTML catatan hanya menyimpan penunjuk `catatan-media:<nama file>`, sehingga
  * file catatan JSON tetap kecil. Saat ekspor backup, penunjuk ini diubah
  * kembali menjadi data URL agar kompatibel dengan versi web.
+ *
+ * Scope mengikuti akun: "media" untuk mode lokal, "media-<uid>" untuk akun.
  */
 object MediaStore {
 
     const val PREFIX = "catatan-media:"
 
     private lateinit var appContext: Context
+    private var dirName = "media"
 
-    fun init(context: Context) {
+    private val safeName = Regex("^[A-Za-z0-9._-]+$")
+
+    fun init(context: Context, scopeDirName: String = "media") {
         appContext = context.applicationContext
+        dirName = scopeDirName
         runCatching { dir().mkdirs() }
     }
 
-    private fun dir(): File = File(appContext.filesDir, "media")
+    /** Ganti folder media saat akun/login berubah. */
+    fun setScope(scopeDirName: String) {
+        dirName = scopeDirName.ifBlank { "media" }
+        runCatching { dir().mkdirs() }
+    }
+
+    private fun dir(): File = File(appContext.filesDir, dirName)
+
+    /* ----------------------------------------------------------
+       Akses file (dipakai sinkronisasi)
+       ---------------------------------------------------------- */
+
+    fun listNames(): List<String> = runCatching {
+        dir().listFiles()?.filter { it.isFile }?.map { it.name } ?: emptyList()
+    }.getOrDefault(emptyList())
+
+    fun fileNamed(name: String): File? =
+        if (name.matches(safeName)) File(dir(), name).takeIf { it.isFile } else null
+
+    fun saveBytes(name: String, bytes: ByteArray): File? {
+        if (!name.matches(safeName)) return null
+        return runCatching {
+            File(dir(), name).apply { writeBytes(bytes) }
+        }.getOrNull()
+    }
+
+    /** Hapus semua file media pada scope saat ini. */
+    fun clearAll() {
+        runCatching {
+            dir().listFiles()?.forEach { file -> if (file.isFile) file.delete() }
+        }
+    }
+
+    /** Salin media dari folder scope lain (mis. lokal -> akun saat login). */
+    fun copyAllFrom(sourceDirName: String) {
+        if (sourceDirName == dirName) return
+        runCatching {
+            File(appContext.filesDir, sourceDirName).listFiles()?.forEach { file ->
+                if (file.isFile && file.name.matches(safeName)) {
+                    File(dir(), file.name).writeBytes(file.readBytes())
+                }
+            }
+        }
+    }
+
+    /* ----------------------------------------------------------
+       Konversi data URL <-> penunjuk lokal
+       ---------------------------------------------------------- */
 
     /** Simpan data URL, kembalikan penunjuk lokal. */
     fun save(dataUrl: String): String {
@@ -47,7 +100,7 @@ object MediaStore {
 
     fun fileFor(src: String): File? =
         if (src.startsWith(PREFIX)) {
-            File(dir(), src.removePrefix(PREFIX)).takeIf { it.isFile }
+            fileNamed(src.removePrefix(PREFIX))
         } else null
 
     fun resolve(src: String): String = fileFor(src)?.absolutePath ?: src

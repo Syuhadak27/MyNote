@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
@@ -50,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.catatan.app.data.Backup
+import com.catatan.app.sync.SyncManager
 import com.catatan.app.ui.theme.CatatanTheme
 import com.catatan.app.ui.theme.parseHex
 import com.catatan.app.util.fmtDateTime
@@ -72,6 +74,18 @@ fun SettingsScreen(state: AppState) {
     val store by state.repo.store.collectAsState()
     val settings = store.settings
     val backup = rememberBackupActions(state)
+    val user by state.authManager.user.collectAsState()
+    val syncState by state.syncManager.state.collectAsState()
+
+    val syncStatus = when (syncState) {
+        SyncManager.SyncState.Syncing -> "Sedang sinkronisasi…"
+        is SyncManager.SyncState.Success ->
+            "Terakhir sinkronisasi: " + fmtDateTime((syncState as SyncManager.SyncState.Success).at)
+        is SyncManager.SyncState.Error ->
+            "Sinkronisasi gagal: " + (syncState as SyncManager.SyncState.Error).message
+        SyncManager.SyncState.Idle ->
+            if (state.autoSync) "Sinkronisasi otomatis aktif" else "Sinkronisasi manual"
+    }
 
     var refreshTick by remember { mutableIntStateOf(0) }
     val (usedBytes, totalBytes) = remember(refreshTick) { state.storageInfo() }
@@ -112,6 +126,110 @@ fun SettingsScreen(state: AppState) {
                 .verticalScroll(rememberScrollState())
                 .padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 30.dp)
         ) {
+            /* ---------------- 0. Akun & sinkronisasi ---------------- */
+            SectionLabel("Akun & sinkronisasi")
+            SettingsCard {
+                if (user != null) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(c.accentSoft),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Filled.Person,
+                                    contentDescription = null,
+                                    tint = c.accentStrong,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    user?.email ?: "Akun Google",
+                                    color = c.text,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.W600,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    "Terhubung · data per akun dipisah",
+                                    color = c.text3,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(11.dp))
+                        Text(
+                            syncStatus,
+                            color = if (syncState is SyncManager.SyncState.Error) c.danger else c.text3,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AppButton(
+                                text = "Sinkronkan sekarang",
+                                onClick = { state.syncNow() },
+                                type = BtnType.PRIMARY,
+                                icon = Icons.Filled.Refresh,
+                                small = true,
+                                enabled = syncState !is SyncManager.SyncState.Syncing
+                            )
+                            AppButton(
+                                text = "Keluar akun",
+                                onClick = { state.signOut() },
+                                type = BtnType.GHOST,
+                                small = true
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        TextActionButton(
+                            text = "Hapus data cloud akun ini",
+                            accent = false,
+                            onClick = {
+                                state.confirm(
+                                    title = "Hapus data cloud?",
+                                    message = "Semua catatan, folder, riwayat, dan media akun ini di cloud akan dihapus. Salinan akun di perangkat ini juga dihapus, lalu kamu keluar dari akun. Data mode lokal tetap aman.",
+                                    confirmText = "Hapus data cloud",
+                                    danger = true
+                                ) { state.deleteCloudData() }
+                            }
+                        )
+                    }
+                    SwitchRow(
+                        title = "Sinkronisasi otomatis",
+                        subtitle = "Saat aplikasi dibuka dan setelah catatan berubah",
+                        checked = state.autoSync
+                    ) { value -> state.setAutoSync(value) }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)
+                    ) {
+                        Text(
+                            "Masuk dengan Google untuk menyinkronkan catatan antarperangkat. " +
+                                "Tanpa akun pun aplikasi tetap bisa dipakai penuh.",
+                            color = c.text3,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        AppButton(
+                            text = "Masuk dengan Google",
+                            onClick = { state.signInWithGoogle() },
+                            type = BtnType.PRIMARY,
+                            icon = Icons.Filled.Person,
+                            block = true
+                        )
+                    }
+                }
+            }
+
             /* ---------------- 1. Tampilan ---------------- */
             SectionLabel("Tampilan")
             SettingsCard {
@@ -295,7 +413,9 @@ fun SettingsScreen(state: AppState) {
                         text = "Terakhir backup: " +
                             (if (settings.lastBackupAt > 0) fmtDateTime(settings.lastBackupAt)
                             else "Belum pernah") +
-                            ". Data hanya tersimpan di perangkat ini.",
+                            (if (user != null)
+                                ". Catatan tersinkron dengan akun ${user?.email}."
+                            else ". Data hanya tersimpan di perangkat ini."),
                         color = c.text3,
                         fontSize = 11.5.sp,
                         lineHeight = 16.sp

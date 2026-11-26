@@ -70,7 +70,9 @@ data class AppSettings(
     val spellcheck: Boolean = true,
     val enterCreatesBlock: Boolean = false,
     val lastBackupAt: Long = 0,
-    val recentSearches: List<String> = emptyList()
+    val recentSearches: List<String> = emptyList(),
+    /** Dipakai sinkronisasi untuk menentukan versi pengaturan mana yang menang. */
+    val settingsUpdatedAt: Long = 0
 )
 
 /** Seluruh isi penyimpanan (pengganti IndexedDB). */

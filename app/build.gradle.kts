@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -22,6 +23,19 @@ android {
             "String",
             "UPDATE_URL",
             "\"https://api.github.com/repos/Syuhadak27/MyNote/releases/latest\""
+        )
+
+        // Firebase Realtime Database — URL diambil dari gradle.properties.
+        // Nilai default bisa diganti sesuai region database di Firebase Console.
+        val databaseUrl = (findProperty("firebaseDatabaseUrl") as String?)
+            ?: "https://mynotes-30b82-default-rtdb.firebaseio.com"
+        buildConfigField("String", "FIREBASE_DATABASE_URL", "\"$databaseUrl\"")
+
+        // OAuth client untuk Google Sign-In (client_type = 3 di google-services.json).
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            "\"869732787640-7344plhfpbitl0qkpk4ociaf9vo682um.apps.googleusercontent.com\""
         )
     }
 
@@ -94,4 +108,16 @@ dependencies {
 
     // Gambar (thumbnail, lampiran)
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    /* ---- Akun & sinkronisasi (Firebase) ---- */
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-database-ktx")
+    implementation("com.google.firebase:firebase-storage-ktx")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    // Google Sign-In lewat Credential Manager
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 }

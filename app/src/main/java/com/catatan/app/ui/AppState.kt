@@ -10,12 +10,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.catatan.app.BuildConfig
+import com.catatan.app.CatatanApp
+import com.catatan.app.auth.AuthManager
 import com.catatan.app.data.AppSettings
 import com.catatan.app.data.Backup
 import com.catatan.app.data.BackupSummary
 import com.catatan.app.data.Category
 import com.catatan.app.data.MediaStore
 import com.catatan.app.data.Note
+import com.catatan.app.sync.SyncManager
 import com.catatan.app.data.Repo
 import com.catatan.app.data.Revision
 import com.catatan.app.data.Store
@@ -25,8 +28,10 @@ import com.catatan.app.update.Updater
 import com.catatan.app.util.uid
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -75,6 +80,14 @@ sealed class Modal {
     data object About : Modal()
     data class ImportMode(val summary: BackupSummary, val fileName: String) : Modal()
     data object UpdateInfoDialog : Modal()
+
+    /** Ditampilkan setelah login Google saat perangkat punya data lokal. */
+    data class LoginMerge(
+        val uid: String,
+        val localCount: Int,
+        val onMerge: () -> Unit,
+        val onSkip: () -> Unit
+    ) : Modal()
 }
 
 data class ToastData(
@@ -88,9 +101,33 @@ data class ToastData(
    AppState — semua state & aksi bersama layar
    ============================================================ */
 
-class AppState(val repo: Repo, val appContext: Context) {
+@OptIn(FlowPreview::class)
+class AppState(
+    val repo: Repo,
+    val appContext: Context,
+    val authManager: AuthManager,
+    val syncManager: SyncManager
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /** Activity dipakai Credential Manager untuk menampilkan pemilih akun. */
+    var activity: Context? = null
+
+    init {
+        // Perubahan status login -> pindah scope penyimpanan.
+        scope.launch {
+            authManager.user.collect { user -> handleAuthUser(user?.uid) }
+        }
+        // Auto sync beberapa detik setelah catatan berubah.
+        scope.launch {
+            repo.store.debounce(4000).collect {
+                if (authManager.isSignedIn && autoSync) {
+                    runCatching { syncManager.syncNow() }
+                }
+            }
+        }
+    }
 
     /* --- Navigasi --- */
     var stack by mutableStateOf(listOf<Screen>(Screen.Notes))
@@ -442,6 +479,126 @@ class AppState(val repo: Repo, val appContext: Context) {
         }
     }
 
+    /* ============================================================
+       Akun Google & sinkronisasi
+       ============================================================ */
+
+    /** Flag UI untuk sakelar auto sync (nilai aslinya ada di SharedPreferences). */
+    var autoSync by mutableStateOf(syncManager.autoSync)
+        private set
+
+    private fun handleAuthUser(uid: String?) {
+        val desired = uid ?: "local"
+        if (repo.scope == desired) return
+
+        if (uid == null) {
+            authManager.pendingUid = null
+            repo.switchScope("local")
+            MediaStore.setScope(repo.mediaDirName)
+            syncManager.stop()
+            showToast("Keluar dari akun. Data lokal kembali dipakai.", "info")
+            return
+        }
+
+        val hasLocalData = repo.scope == "local" &&
+            (repo.current.notes.isNotEmpty() ||
+                repo.current.categories.isNotEmpty() ||
+                repo.current.revisions.isNotEmpty())
+
+        if (hasLocalData) {
+            if (authManager.pendingUid == null) authManager.pendingUid = uid
+            openModal(
+                Modal.LoginMerge(
+                    uid = uid,
+                    localCount = repo.current.notes.size,
+                    onMerge = { finishLogin(uid, mergeLocal = true) },
+                    onSkip = { finishLogin(uid, mergeLocal = false) }
+                )
+            )
+        } else {
+            authManager.pendingUid = null
+            finishLogin(uid, mergeLocal = false, silent = true)
+        }
+    }
+
+    private fun finishLogin(uid: String, mergeLocal: Boolean, silent: Boolean = false) {
+        val localStore = if (mergeLocal && repo.scope == "local") repo.current else null
+        val localMediaDir = if (localStore != null) repo.mediaDirName else null
+
+        repo.switchScope(uid)
+        MediaStore.setScope(repo.mediaDirName)
+        if (localStore != null) {
+            repo.mergeAll(localStore)
+            if (localMediaDir != null) MediaStore.copyAllFrom(localMediaDir)
+        }
+        authManager.pendingUid = null
+        closeModal()
+        if (!silent) {
+            showToast(if (mergeLocal) "Data lokal digabungkan ke akun" else "Data akun dimuat")
+        }
+        scope.launch {
+            syncManager.syncNow().onFailure {
+                showToast("Sinkronisasi gagal: ${it.message}", "error", 5000)
+            }
+        }
+    }
+
+    fun signInWithGoogle() {
+        val activity = activity
+        if (activity == null) {
+            showToast("Tidak dapat membuka pemilih akun", "error")
+            return
+        }
+        if (authManager.isSignedIn) return
+        scope.launch {
+            runCatching { authManager.signIn(activity) }
+                .onFailure { showToast("Masuk Google gagal: ${it.message}", "error", 5000) }
+        }
+    }
+
+    fun signOut() {
+        if (!authManager.isSignedIn) return
+        repo.flushNow()
+        authManager.signOut() // observer yang memindahkan scope ke lokal
+    }
+
+    fun syncNow(manual: Boolean = true) {
+        if (!authManager.isSignedIn) {
+            if (manual) showToast("Masuk dengan Google dulu untuk sinkronisasi", "info")
+            return
+        }
+        scope.launch {
+            val result = syncManager.syncNow()
+            result.onSuccess { if (manual) showToast("Sinkronisasi selesai") }
+                .onFailure { showToast("Sinkronisasi gagal: ${it.message}", "error", 5000) }
+        }
+    }
+
+    fun onAppResume() {
+        if (authManager.isSignedIn && autoSync && authManager.pendingUid == null) {
+            syncNow(manual = false)
+        }
+    }
+
+    fun setAutoSync(value: Boolean) {
+        autoSync = value
+        syncManager.autoSync = value
+        if (value) onAppResume()
+    }
+
+    fun deleteCloudData() {
+        scope.launch {
+            val result = syncManager.deleteRemoteData()
+            result.onSuccess {
+                // Cegah salinan lokal akun ter-upload lagi oleh auto sync.
+                MediaStore.clearAll()
+                repo.clearEverything()
+                authManager.signOut()
+                showToast("Data cloud dan salinan akun di perangkat dihapus")
+            }.onFailure { showToast("Gagal menghapus: ${it.message}", "error", 5000) }
+        }
+    }
+
     /* --- Penyimpanan --- */
     fun storageInfo(): Pair<Long, Long> = repo.storageUsage()
 }
@@ -453,7 +610,12 @@ class AppState(val repo: Repo, val appContext: Context) {
 class AppViewModel(private val repo: Repo, private val appContext: Context) :
     ViewModel() {
 
-    val state = AppState(repo, appContext)
+    val state = AppState(
+        repo,
+        appContext,
+        (appContext.applicationContext as CatatanApp).authManager,
+        (appContext.applicationContext as CatatanApp).syncManager
+    )
 
     class Factory(private val repo: Repo, private val context: Context) :
         ViewModelProvider.Factory {
