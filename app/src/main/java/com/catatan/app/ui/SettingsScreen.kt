@@ -195,7 +195,7 @@ fun SettingsScreen(state: AppState) {
                             onClick = {
                                 state.confirm(
                                     title = "Hapus data cloud?",
-                                    message = "Semua catatan, folder, riwayat, dan media akun ini di cloud akan dihapus. Salinan akun di perangkat ini juga dihapus, lalu kamu keluar dari akun. Data mode lokal tetap aman.",
+                                    message = "Semua catatan, folder, dan riwayat akun ini di cloud akan dihapus. Salinan akun di perangkat ini juga dihapus, lalu kamu keluar dari akun. Data mode lokal tetap aman.",
                                     confirmText = "Hapus data cloud",
                                     danger = true
                                 ) { state.deleteCloudData() }

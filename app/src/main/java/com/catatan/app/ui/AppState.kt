@@ -591,10 +591,9 @@ class AppState(
             val result = syncManager.deleteRemoteData()
             result.onSuccess {
                 // Cegah salinan lokal akun ter-upload lagi oleh auto sync.
-                MediaStore.clearAll()
                 repo.clearEverything()
                 authManager.signOut()
-                showToast("Data cloud dan salinan akun di perangkat dihapus")
+                showToast("Data cloud akun ini dihapus")
             }.onFailure { showToast("Gagal menghapus: ${it.message}", "error", 5000) }
         }
     }

@@ -5,15 +5,12 @@ import com.catatan.app.BuildConfig
 import com.catatan.app.auth.AuthManager
 import com.catatan.app.data.AppSettings
 import com.catatan.app.data.Category
-import com.catatan.app.data.MediaStore
 import com.catatan.app.data.Note
 import com.catatan.app.data.Repo
 import com.catatan.app.data.Revision
 import com.catatan.app.data.Store
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.storage.FirebaseStorage
-import com.google.firebase.storage.StorageException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,12 +22,15 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.KSerializer
 
 /* ============================================================
-   SyncManager — Realtime Database + Firebase Storage.
+   SyncManager — Realtime Database saja (tanpa Cloud Storage).
 
-   Semua data berada di bawah /users/{uid}. Akses dijaga oleh rules
+   Semua data berada di bawah /users/{uid}. Akses dijaga rules
    Firebase (auth.uid === uid), jadi akun lain tidak bisa membaca.
    Konflik diselesaikan per-item: nilai dengan updatedAt/createdAt
    terbaru yang menang. Catatan terhapus memakai tombstone (isDeleted).
+
+   Gambar/audio sengaja tidak disinkronkan: file media tetap lokal
+   di perangkat masing-masing (folder media-<uid>).
    ============================================================ */
 
 class SyncManager(
@@ -57,7 +57,6 @@ class SyncManager(
     val state: StateFlow<SyncState> = _state.asStateFlow()
 
     private val database by lazy { FirebaseDatabase.getInstance(BuildConfig.FIREBASE_DATABASE_URL) }
-    private val storage by lazy { FirebaseStorage.getInstance() }
     private val mutex = Mutex()
 
     /** Tarik data cloud, gabungkan dengan lokal, lalu dorong yang lebih baru. */
@@ -70,8 +69,6 @@ class SyncManager(
                 runCatching {
                     runCatching { syncData(uid) }
                         .onFailure { throw IllegalStateException("Database: ${it.message}", it) }
-                    runCatching { syncMedia(uid) }
-                        .onFailure { throw IllegalStateException("Media: ${it.message}", it) }
                     _state.value = SyncState.Success(System.currentTimeMillis())
                 }.onFailure { e ->
                     _state.value = SyncState.Error(e.message ?: "Gagal sinkronisasi")
@@ -80,25 +77,13 @@ class SyncManager(
         }
     }
 
-    /** Hapus salinan cloud akun ini (media ikut terhapus). */
+    /** Hapus salinan cloud akun ini. */
     suspend fun deleteRemoteData(): Result<Unit> {
         val uid = authManager.currentUid
             ?: return Result.failure(IllegalStateException("Belum masuk dengan Google"))
         return withContext(Dispatchers.IO) {
             runCatching {
                 database.reference.child("users").child(uid).removeValue().await()
-                val listed = runCatching {
-                    storage.reference.child("users").child(uid).child("media").listAll().await()
-                }
-                val listing = listed.getOrNull()
-                if (listing != null) {
-                    listing.items.forEach { it.delete().await() }
-                } else {
-                    val e = listed.exceptionOrNull()
-                    if (e !is StorageException || e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) {
-                        throw e ?: error("Gagal membaca daftar media")
-                    }
-                }
                 _state.value = SyncState.Idle
             }.onFailure { e ->
                 _state.value = SyncState.Error(e.message ?: "Gagal menghapus data cloud")
@@ -201,51 +186,5 @@ class SyncManager(
             if (existing == null || time(item) > time(existing)) map[key] = item
         }
         return map.values.toList()
-    }
-
-    /* ----------------------------------------------------------
-       Media — Firebase Storage, penunjuk catatan-media:<nama> tetap
-       dipakai supaya HTML tidak perlu diubah saat pindah perangkat.
-       ---------------------------------------------------------- */
-
-    private suspend fun syncMedia(uid: String) {
-        val safeName = Regex("^[A-Za-z0-9._-]+$")
-        val remoteDir = storage.reference.child("users").child(uid).child("media")
-
-        // Folder media belum ada -> listAll() bisa gagal dengan OBJECT_NOT_FOUND.
-        val listed = runCatching { remoteDir.listAll().await() }
-        val listing = listed.getOrNull()
-        if (listing == null) {
-            val e = listed.exceptionOrNull()
-            if (e is StorageException && e.errorCode == StorageException.ERROR_OBJECT_NOT_FOUND) return
-            throw e ?: error("Gagal membaca daftar media")
-        }
-
-        val remoteItems = listing.items.filter { it.name.matches(safeName) }
-        val remoteNames = remoteItems.map { it.name }.toSet()
-        val localNames = MediaStore.listNames().toSet()
-
-        for (name in localNames - remoteNames) {
-            val file = MediaStore.fileNamed(name) ?: continue
-            val uploaded = runCatching { remoteDir.child(name).putBytes(file.readBytes()).await() }
-            if (uploaded.isFailure) {
-                val e = uploaded.exceptionOrNull()
-                if (e !is StorageException || e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) throw e!!
-            }
-        }
-        for (item in remoteItems) {
-            if (item.name !in localNames) {
-                val downloaded = runCatching { item.getBytes(20L * 1024 * 1024).await() }
-                val bytes = downloaded.getOrNull()
-                if (bytes == null) {
-                    val e = downloaded.exceptionOrNull()
-                    if (e !is StorageException || e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) {
-                        throw e ?: error("Gagal mengunduh ${item.name}")
-                    }
-                } else {
-                    MediaStore.saveBytes(item.name, bytes)
-                }
-            }
-        }
     }
 }
