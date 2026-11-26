@@ -13,6 +13,7 @@ import com.catatan.app.data.Store
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,8 +68,10 @@ class SyncManager(
             mutex.withLock {
                 _state.value = SyncState.Syncing
                 runCatching {
-                    syncData(uid)
-                    syncMedia(uid)
+                    runCatching { syncData(uid) }
+                        .onFailure { throw IllegalStateException("Database: ${it.message}", it) }
+                    runCatching { syncMedia(uid) }
+                        .onFailure { throw IllegalStateException("Media: ${it.message}", it) }
                     _state.value = SyncState.Success(System.currentTimeMillis())
                 }.onFailure { e ->
                     _state.value = SyncState.Error(e.message ?: "Gagal sinkronisasi")
@@ -84,9 +87,18 @@ class SyncManager(
         return withContext(Dispatchers.IO) {
             runCatching {
                 database.reference.child("users").child(uid).removeValue().await()
-                val listing = storage.reference.child("users").child(uid).child("media")
-                    .listAll().await()
-                listing.items.forEach { it.delete().await() }
+                val listed = runCatching {
+                    storage.reference.child("users").child(uid).child("media").listAll().await()
+                }
+                val listing = listed.getOrNull()
+                if (listing != null) {
+                    listing.items.forEach { it.delete().await() }
+                } else {
+                    val e = listed.exceptionOrNull()
+                    if (e !is StorageException || e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) {
+                        throw e ?: error("Gagal membaca daftar media")
+                    }
+                }
                 _state.value = SyncState.Idle
             }.onFailure { e ->
                 _state.value = SyncState.Error(e.message ?: "Gagal menghapus data cloud")
@@ -199,19 +211,40 @@ class SyncManager(
     private suspend fun syncMedia(uid: String) {
         val safeName = Regex("^[A-Za-z0-9._-]+$")
         val remoteDir = storage.reference.child("users").child(uid).child("media")
-        val listing = remoteDir.listAll().await()
+
+        // Folder media belum ada -> listAll() bisa gagal dengan OBJECT_NOT_FOUND.
+        val listed = runCatching { remoteDir.listAll().await() }
+        val listing = listed.getOrNull()
+        if (listing == null) {
+            val e = listed.exceptionOrNull()
+            if (e is StorageException && e.errorCode == StorageException.ERROR_OBJECT_NOT_FOUND) return
+            throw e ?: error("Gagal membaca daftar media")
+        }
+
         val remoteItems = listing.items.filter { it.name.matches(safeName) }
         val remoteNames = remoteItems.map { it.name }.toSet()
         val localNames = MediaStore.listNames().toSet()
 
         for (name in localNames - remoteNames) {
             val file = MediaStore.fileNamed(name) ?: continue
-            remoteDir.child(name).putBytes(file.readBytes()).await()
+            val uploaded = runCatching { remoteDir.child(name).putBytes(file.readBytes()).await() }
+            if (uploaded.isFailure) {
+                val e = uploaded.exceptionOrNull()
+                if (e !is StorageException || e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) throw e!!
+            }
         }
         for (item in remoteItems) {
             if (item.name !in localNames) {
-                val bytes = item.getBytes(20L * 1024 * 1024).await()
-                MediaStore.saveBytes(item.name, bytes)
+                val downloaded = runCatching { item.getBytes(20L * 1024 * 1024).await() }
+                val bytes = downloaded.getOrNull()
+                if (bytes == null) {
+                    val e = downloaded.exceptionOrNull()
+                    if (e !is StorageException || e.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) {
+                        throw e ?: error("Gagal mengunduh ${item.name}")
+                    }
+                } else {
+                    MediaStore.saveBytes(item.name, bytes)
+                }
             }
         }
     }

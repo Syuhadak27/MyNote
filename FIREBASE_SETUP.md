@@ -63,6 +63,14 @@ users/{uid}/settings                -> AppSettings (JSON)
 users/{uid}/media/{nama file}       -> gambar/audio
 ```
 
+## Troubleshooting singkat
+- Pesan `Media: Object does not exist at location` berarti folder media belum ada atau
+  bucket salah. Pastikan rules Storage memakai `rules_version = '2'` dan bucket di Console
+  sama dengan `storage_bucket` di `google-services.json`.
+- Cloud Storage for Firebase mensyaratkan paket **Blaze**; project Spark akan ditolak.
+- Pesan `Database: Permission denied` berarti rules RTDB belum di-Publish atau
+  `firebaseDatabaseUrl` di `gradle.properties` bukan URL database yang dipakai.
+
 ## Catatan batasan versi awal
 - Konflik diselesaikan per-item dengan `updatedAt`/`createdAt` terbaru yang menang.
 - Hapus permanen belum membuat tombstone lintas perangkat; hapus sementara
