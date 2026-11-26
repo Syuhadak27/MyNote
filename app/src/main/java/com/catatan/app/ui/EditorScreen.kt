@@ -1819,8 +1819,10 @@ private fun FieldBox(label: String, value: String, onChange: (String) -> Unit, k
 }
 
 @Composable
-private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedString =
-    remember(text, marks, base) {
+private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedString {
+    // Diambil sebelum remember: getter tema adalah composable.
+    val accentStrong = CatatanTheme.colors.accentStrong
+    return remember(text, marks, base, accentStrong) {
         buildAnnotatedString {
             addStyle(SpanStyle(color = base), 0, text.length)
             append(text)
@@ -1837,7 +1839,7 @@ private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedStrin
                         MarkType.HIGHLIGHT -> m.value?.let { addStyle(SpanStyle(background = parseHex(it)), s, e) }
                         MarkType.LINK -> addStyle(
                             SpanStyle(
-                                color = CatatanTheme.colors.accentStrong,
+                                color = accentStrong,
                                 textDecoration = TextDecoration.Underline
                             ),
                             s, e
@@ -1847,6 +1849,7 @@ private fun styled(text: String, marks: List<Mark>, base: Color): AnnotatedStrin
             }
         }
     }
+}
 
 @Composable
 private fun DataImage(dataUrl: String, modifier: Modifier = Modifier) {
