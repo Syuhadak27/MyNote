@@ -580,7 +580,7 @@ class AppState(
         }
     }
 
-    fun setAutoSync(value: Boolean) {
+    fun updateAutoSync(value: Boolean) {
         autoSync = value
         syncManager.autoSync = value
         if (value) onAppResume()

@@ -206,7 +206,7 @@ fun SettingsScreen(state: AppState) {
                         title = "Sinkronisasi otomatis",
                         subtitle = "Saat aplikasi dibuka dan setelah catatan berubah",
                         checked = state.autoSync
-                    ) { value -> state.setAutoSync(value) }
+                    ) { value -> state.updateAutoSync(value) }
                 } else {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)
